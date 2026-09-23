@@ -15,9 +15,17 @@ class DashboardController extends Controller
         $user     = $request->user();
         $officeId = $user->office_id;
 
-        // ---- Guard: no office assigned ----
+        $tab = $request->input('tab');
+        if (!in_array($tab, ['mine', 'routed'], true)) {
+            $tab = 'mine';
+        }
+
+        /* ---------------- Guard: no office assigned ---------------- */
         if (!$officeId) {
             return Inertia::render('OfficeHead/Dashboard', [
+                'tab'                => $tab,
+                'tabCounts'          => ['mine' => 0, 'routed' => 0],
+                'myOffice'           => null,
                 'counts'             => [
                     'total' => 0, 'ongoing' => 0, 'received' => 0,
                     'completed' => 0, 'returned' => 0, 'cancelled' => 0,
@@ -47,23 +55,44 @@ class DashboardController extends Controller
             ]);
         }
 
-        // =============================================================
-        //  Single shared scope — any document that touched this office
-        //  at any point (origin, current, destination, or in route).
-        // =============================================================
-        $scoped = function () use ($officeId) {
-            return Document::where(function ($q) use ($officeId) {
-                $q->where('originating_office_id', $officeId)
-                  ->orWhere('current_office_id', $officeId)
-                  ->orWhere('current_destination_office_id', $officeId)
-                  ->orWhereHas(
-                      'routes',
-                      fn ($r) => $r->where('office_id', $officeId)
-                  );
-            });
+        /* =============================================================
+         *  Tab counts — total documents in each scope
+         * ============================================================= */
+        $tabCounts = [
+            'mine' => Document::where('originating_office_id', $officeId)->count(),
+
+            'routed' => Document::where('originating_office_id', '!=', $officeId)
+                ->where(function ($q) use ($officeId) {
+                    $q->where('current_office_id', $officeId)
+                      ->orWhere('current_destination_office_id', $officeId)
+                      ->orWhereHas('routes', fn ($r) => $r->where('office_id', $officeId));
+                })
+                ->count(),
+        ];
+
+        /* =============================================================
+         *  The scope used by everything below.
+         *    mine   → documents registered by this office
+         *    routed → documents from other offices that touch this one
+         * ============================================================= */
+        $scoped = function () use ($officeId, $tab) {
+            $q = Document::query();
+
+            if ($tab === 'mine') {
+                $q->where('originating_office_id', $officeId);
+            } else {
+                $q->where('originating_office_id', '!=', $officeId)
+                  ->where(function ($q2) use ($officeId) {
+                      $q2->where('current_office_id', $officeId)
+                         ->orWhere('current_destination_office_id', $officeId)
+                         ->orWhereHas('routes', fn ($r) => $r->where('office_id', $officeId));
+                  });
+            }
+
+            return $q;
         };
 
-        // ---------- Status counts ----------
+        /* ---------------- Status counts ---------------- */
         $counts = [
             'total'     => $scoped()->count(),
             'ongoing'   => $scoped()->where('status', Document::STATUS_ONGOING)->count(),
@@ -73,51 +102,88 @@ class DashboardController extends Controller
             'cancelled' => $scoped()->where('status', Document::STATUS_CANCELLED)->count(),
         ];
 
-        // ---------- Operational tiles ----------
-        $operational = [
-            'awaiting_receipt' => Document::where(
-                    'current_destination_office_id',
-                    $officeId
-                )
-                ->whereNotIn('status', [
-                    Document::STATUS_COMPLETED,
-                    Document::STATUS_CANCELLED,
-                ])
-                ->count(),
+        /* =============================================================
+         *  Operational tiles — meaning shifts with the tab.
+         *
+         *  MINE tab — the tiles describe MY outgoing documents:
+         *    awaiting_receipt  = my documents not yet received at the next office
+         *    in_hand           = my documents currently held by another office
+         *    overdue           = my documents whose current holder is overdue
+         *    completed_this_week = my documents that finished this week
+         *
+         *  ROUTED tab — the tiles describe what MY office is doing:
+         *    awaiting_receipt  = documents heading to me that I haven't scanned yet
+         *    in_hand           = documents I'm currently holding
+         *    overdue           = documents overdue while held at MY office
+         *    completed_this_week = documents routed through me that finished this week
+         * ============================================================= */
 
-            'in_hand' => Document::where('current_office_id', $officeId)
+        $awaitingReceipt = $tab === 'mine'
+            ? $scoped()
+                ->whereNotIn('status', [Document::STATUS_COMPLETED, Document::STATUS_CANCELLED])
+                ->whereNotNull('current_destination_office_id')
+                ->count()
+            : $scoped()
+                ->where('current_destination_office_id', $officeId)
+                ->whereNotIn('status', [Document::STATUS_COMPLETED, Document::STATUS_CANCELLED])
+                ->count();
+
+        $inHand = $tab === 'mine'
+            ? $scoped()->where('status', Document::STATUS_RECEIVED)->count()
+            : $scoped()
+                ->where('current_office_id', $officeId)
                 ->where('status', Document::STATUS_RECEIVED)
-                ->count(),
+                ->count();
 
-            'overdue' => DocumentRoute::where('office_id', $officeId)
-                ->whereNotNull('due_at')
-                ->whereNull('forwarded_at')
-                ->where('due_at', '<', now())
-                ->count(),
+        $overdue = DocumentRoute::query()
+            ->whereNotNull('due_at')
+            ->whereNull('forwarded_at')
+            ->where('due_at', '<', now())
+            ->when($tab === 'mine', function ($q) use ($officeId) {
+                // My documents that are overdue somewhere else
+                $q->where('office_id', '!=', $officeId)
+                  ->whereHas('document', fn ($d) => $d
+                      ->where('originating_office_id', $officeId)
+                      ->whereNotIn('status', [
+                          Document::STATUS_COMPLETED,
+                          Document::STATUS_CANCELLED,
+                      ])
+                  );
+            }, function ($q) use ($officeId) {
+                // Documents overdue while held at MY office
+                $q->where('office_id', $officeId)
+                  ->whereHas('document', fn ($d) => $d
+                      ->where('originating_office_id', '!=', $officeId)
+                  );
+            })
+            ->count();
 
-            'completed_this_week' => $scoped()
-                ->where('status', Document::STATUS_COMPLETED)
-                ->where(function ($q) {
-                    // Prefer completed_at; fall back to updated_at
-                    $q->whereBetween('completed_at', [
-                        now()->startOfWeek(),
-                        now()->endOfWeek(),
-                    ])->orWhere(function ($q2) {
-                        $q2->whereNull('completed_at')
-                           ->whereBetween('updated_at', [
-                               now()->startOfWeek(),
-                               now()->endOfWeek(),
-                           ]);
-                    });
-                })
-                ->count(),
+        $completedThisWeek = $scoped()
+            ->where('status', Document::STATUS_COMPLETED)
+            ->where(function ($q) {
+                $q->whereBetween('completed_at', [
+                    now()->startOfWeek(),
+                    now()->endOfWeek(),
+                ])->orWhere(function ($q2) {
+                    $q2->whereNull('completed_at')
+                       ->whereBetween('updated_at', [
+                           now()->startOfWeek(),
+                           now()->endOfWeek(),
+                       ]);
+                });
+            })
+            ->count();
+
+        $operational = [
+            'awaiting_receipt'    => $awaitingReceipt,
+            'in_hand'             => $inHand,
+            'overdue'             => $overdue,
+            'completed_this_week' => $completedThisWeek,
         ];
 
-        // =============================================================
-        //  14-day activity series — uses the SAME office scope.
-        //  Uses whereBetween (index-friendly) instead of whereDate.
-        //  Falls back to updated_at when completed_at is missing.
-        // =============================================================
+        /* =============================================================
+         *  14-day activity series — scoped by tab.
+         * ============================================================= */
         $dailyActivity = collect(range(13, 0))->map(function ($daysAgo) use ($scoped) {
             $start = now()->subDays($daysAgo)->startOfDay();
             $end   = $start->copy()->endOfDay();
@@ -132,10 +198,7 @@ class DashboardController extends Controller
 
                 'completed' => $scoped()
                     ->where(function ($q) use ($start, $end) {
-                        // Primary: completed_at in range
                         $q->whereBetween('completed_at', [$start, $end]);
-
-                        // Fallback: status is COMPLETED but completed_at is null
                         $q->orWhere(function ($q2) use ($start, $end) {
                             $q2->where('status', Document::STATUS_COMPLETED)
                                ->whereNull('completed_at')
@@ -146,9 +209,7 @@ class DashboardController extends Controller
             ];
         })->values();
 
-        // =============================================================
-        //  Status distribution — every status, so the sum matches Total
-        // =============================================================
+        /* ---------------- Status distribution ---------------- */
         $statusDistribution = [
             ['name' => 'Ongoing',   'value' => $counts['ongoing'],   'color' => '#0ea5e9'],
             ['name' => 'In Hand',   'value' => $counts['received'],  'color' => '#6366f1'],
@@ -157,45 +218,60 @@ class DashboardController extends Controller
             ['name' => 'Cancelled', 'value' => $counts['cancelled'], 'color' => '#ef4444'],
         ];
 
-        // =============================================================
-        //  Office performance — documents ROUTED THROUGH this office
-        //  to any other office. Uses the shared scope so it sees both
-        //  outbound (originated here) and pass-through documents.
-        // =============================================================
-        $officePerformance = DocumentRoute::query()
-            ->whereHas('document', function ($q) use ($officeId) {
-                $q->where(function ($q) use ($officeId) {
-                    $q->where('originating_office_id', $officeId)
-                      ->orWhere('current_office_id', $officeId)
-                      ->orWhere('current_destination_office_id', $officeId)
-                      ->orWhereHas(
-                          'routes',
-                          fn ($r) => $r->where('office_id', $officeId)
-                      );
-                });
-            })
-            ->where('office_id', '!=', $officeId)
-            ->whereNotNull('received_at')
-            ->whereNotNull('forwarded_at')
-            ->with('office:id,name')
-            ->get()
-            ->groupBy('office_id')
-            ->map(function ($routes) {
-                $avgSeconds = $routes->avg(
-                    fn ($r) => $r->received_at->diffInSeconds($r->forwarded_at)
-                );
+        /* =============================================================
+         *  Office performance — depends on the tab.
+         *
+         *  MINE   → where my documents go (destination offices)
+         *  ROUTED → which offices send me documents (originating offices)
+         * ============================================================= */
+        if ($tab === 'mine') {
+            $officePerformance = DocumentRoute::query()
+                ->whereHas('document', fn ($q) => $q
+                    ->where('originating_office_id', $officeId)
+                )
+                ->where('office_id', '!=', $officeId)
+                ->whereNotNull('received_at')
+                ->whereNotNull('forwarded_at')
+                ->with('office:id,name')
+                ->get()
+                ->groupBy('office_id')
+                ->map(function ($routes) {
+                    $avgSeconds = $routes->avg(
+                        fn ($r) => $r->received_at->diffInSeconds($r->forwarded_at)
+                    );
 
-                return [
-                    'name'      => $routes->first()->office?->name ?? '—',
-                    'total'     => $routes->count(),
-                    'avg_hours' => $avgSeconds ? round($avgSeconds / 3600, 1) : 0,
-                ];
-            })
-            ->sortByDesc('total')
-            ->take(5)
-            ->values();
+                    return [
+                        'name'      => $routes->first()->office?->name ?? '—',
+                        'total'     => $routes->count(),
+                        'avg_hours' => $avgSeconds ? round($avgSeconds / 3600, 1) : 0,
+                    ];
+                })
+                ->sortByDesc('total')
+                ->take(5)
+                ->values();
+        } else {
+            $officePerformance = Document::query()
+                ->where('originating_office_id', '!=', $officeId)
+                ->whereHas('routes', fn ($r) => $r->where('office_id', $officeId))
+                ->with('originatingOffice:id,name')
+                ->get()
+                ->groupBy('originating_office_id')
+                ->map(function ($docs) {
+                    return [
+                        'name'      => $docs->first()->originatingOffice?->name ?? '—',
+                        'total'     => $docs->count(),
+                        'avg_hours' => 0,
+                    ];
+                })
+                ->sortByDesc('total')
+                ->take(5)
+                ->values();
+        }
 
         return Inertia::render('OfficeHead/Dashboard', [
+            'tab'                => $tab,
+            'tabCounts'          => $tabCounts,
+            'myOffice'           => $user->office?->only(['id', 'name', 'code']),
             'counts'             => $counts,
             'operational'        => $operational,
             'dailyActivity'      => $dailyActivity,

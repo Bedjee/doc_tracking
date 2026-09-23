@@ -31,12 +31,50 @@ class DocumentController extends Controller
         $this->authorize('viewAny', Document::class);
 
         $user = $request->user();
+        $officeId = $user->office_id;
+
+        /*
+         * Two tabs:
+         *   mine   — documents registered by the user's own office
+         *   routed — documents from other offices that are routed to/through
+         *            the user's office (current holder, next destination, or
+         *            anywhere in the route history)
+         */
+        $tab = $request->input('tab');
+        if (!in_array($tab, ['mine', 'routed'], true)) {
+            $tab = 'mine';
+        }
 
         $filters = $request->only([
             'search', 'status', 'document_type_id', 'originating_office_id',
             'current_office_id', 'destination_office_id', 'date_from', 'date_to', 'scope',
         ]);
 
+        /* --------------------------------------------------------------
+         *  Tab counts (unfiltered by search/status — just by office scope)
+         * -------------------------------------------------------------- */
+        $countBase = Document::query()->visibleTo($user);
+
+        $tabCounts = [
+            'mine' => $officeId
+                ? (clone $countBase)->where('originating_office_id', $officeId)->count()
+                : 0,
+
+            'routed' => $officeId
+                ? (clone $countBase)
+                    ->where('originating_office_id', '!=', $officeId)
+                    ->where(function ($q) use ($officeId) {
+                        $q->where('current_office_id', $officeId)
+                          ->orWhere('current_destination_office_id', $officeId)
+                          ->orWhereHas('routes', fn ($r) => $r->where('office_id', $officeId));
+                    })
+                    ->count()
+                : 0,
+        ];
+
+        /* --------------------------------------------------------------
+         *  Main query
+         * -------------------------------------------------------------- */
         $query = Document::query()
             ->visibleTo($user)
             ->with([
@@ -46,6 +84,21 @@ class DocumentController extends Controller
                 'currentDestination:id,name',
             ]);
 
+        // Tab scoping.
+        if ($officeId) {
+            if ($tab === 'mine') {
+                $query->where('originating_office_id', $officeId);
+            } else {
+                $query->where('originating_office_id', '!=', $officeId)
+                      ->where(function ($q) use ($officeId) {
+                          $q->where('current_office_id', $officeId)
+                            ->orWhere('current_destination_office_id', $officeId)
+                            ->orWhereHas('routes', fn ($r) => $r->where('office_id', $officeId));
+                      });
+            }
+        }
+
+        // Search
         if (!empty($filters['search'])) {
             $s = $filters['search'];
             $query->where(function ($q) use ($s) {
@@ -56,6 +109,7 @@ class DocumentController extends Controller
             });
         }
 
+        // Dropdown filters
         foreach ([
             'status', 'document_type_id', 'originating_office_id',
             'current_office_id', 'destination_office_id',
@@ -68,6 +122,7 @@ class DocumentController extends Controller
             }
         }
 
+        // Date range
         if (!empty($filters['date_from'])) {
             $query->whereDate('created_at', '>=', $filters['date_from']);
         }
@@ -75,19 +130,23 @@ class DocumentController extends Controller
             $query->whereDate('created_at', '<=', $filters['date_to']);
         }
 
-        if (($filters['scope'] ?? null) === 'my_office' && $user->office_id) {
-            $query->where(function ($q) use ($user) {
-                $q->where('current_office_id', $user->office_id)
-                  ->orWhere('current_destination_office_id', $user->office_id);
+        // Legacy scope filter (still used by some deep links)
+        if (($filters['scope'] ?? null) === 'my_office' && $officeId) {
+            $query->where(function ($q) use ($officeId) {
+                $q->where('current_office_id', $officeId)
+                  ->orWhere('current_destination_office_id', $officeId);
             });
         }
 
         return Inertia::render('Documents/Index', [
             'documents' => $query->latest()->paginate(15)->withQueryString(),
             'filters'   => $filters,
+            'tab'       => $tab,
+            'tabCounts' => $tabCounts,
             'offices'   => Office::active()->orderBy('name')->get(['id', 'name', 'code']),
             'types'     => DocumentType::active()->orderBy('name')->get(['id', 'name']),
             'statuses'  => Document::STATUSES,
+            'myOffice'  => $officeId ? $user->office?->only(['id', 'name', 'code']) : null,
         ]);
     }
 
@@ -97,7 +156,6 @@ class DocumentController extends Controller
 
         return Inertia::render('Documents/Create', [
             'offices'    => Office::active()->orderBy('name')->get(['id', 'name', 'code', 'description']),
-            'types'      => DocumentType::active()->orderBy('name')->get(['id', 'name']),
             'categories' => TransactionCategory::active()
                 ->orderBy('min_days')
                 ->get(['id', 'name', 'code', 'description', 'min_days', 'max_days']),

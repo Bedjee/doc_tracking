@@ -25,15 +25,30 @@ class DashboardController extends Controller
             'returned'  => (clone $base)->where('status', Document::STATUS_RETURNED)->count(),
         ];
 
+        /*
+         * "Awaiting receipt" = routed to my office but NOT yet scanned in.
+         *
+         * Once an office receives a document, the route service sets
+         * status = RECEIVED while leaving current_destination_office_id
+         * pointing at that same office. Without excluding RECEIVED here,
+         * the document would keep showing under "To receive" forever.
+         *
+         * RETURNED is intentionally NOT excluded — a returned document
+         * is on its way to a new office and that office is genuinely
+         * awaiting its arrival.
+         */
+        $notAwaitingStatuses = [
+            Document::STATUS_RECEIVED,
+            Document::STATUS_COMPLETED,
+            Document::STATUS_CANCELLED,
+        ];
+
         $myOffice = $officeId ? [
             'awaiting_receipt' => Document::where(
                     'current_destination_office_id',
                     $officeId
                 )
-                ->whereNotIn('status', [
-                    Document::STATUS_COMPLETED,
-                    Document::STATUS_CANCELLED,
-                ])
+                ->whereNotIn('status', $notAwaitingStatuses)
                 ->count(),
 
             'in_hand' => Document::where('current_office_id', $officeId)
@@ -44,10 +59,7 @@ class DashboardController extends Controller
         // Preview lists for the two action tiles — capped at 3 each.
         $toReceive = $officeId
             ? Document::where('current_destination_office_id', $officeId)
-                ->whereNotIn('status', [
-                    Document::STATUS_COMPLETED,
-                    Document::STATUS_CANCELLED,
-                ])
+                ->whereNotIn('status', $notAwaitingStatuses)
                 ->with([
                     'type:id,name',
                     'originatingOffice:id,name',

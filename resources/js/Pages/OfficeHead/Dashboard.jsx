@@ -1,12 +1,11 @@
 import { Head, Link, router } from '@inertiajs/react';
 import {
     AlertTriangle,
-    ArrowDownRight,
-    ArrowUpRight,
     CheckCircle2,
     Clock,
     FileText,
     Inbox,
+    Route,
     RotateCcw,
     Send,
     TrendingUp,
@@ -19,12 +18,26 @@ import Button from '@/Components/UI/Button';
 /* ================================================================== */
 
 export default function OfficeHeadDashboard({
+    tab = 'mine',
+    tabCounts = { mine: 0, routed: 0 },
+    myOffice,
     counts = {},
     operational = {},
     dailyActivity = [],
     statusDistribution = [],
     officePerformance = [],
 }) {
+    function switchTab(next) {
+        if (next === tab) return;
+        router.get(
+            route('dashboard'),
+            { tab: next },
+            { preserveState: false, replace: true }
+        );
+    }
+
+    const isMine = tab === 'mine';
+
     return (
         <AuthenticatedLayout
             header={
@@ -33,21 +46,19 @@ export default function OfficeHeadDashboard({
                         <h2 className="truncate text-base font-semibold text-slate-800 sm:text-lg">
                             Office Head Dashboard
                         </h2>
-                        <p className="mt-0.5 hidden text-xs text-slate-500 sm:block">
-                            Operational overview for your office
+                        <p className="mt-0.5 hidden truncate text-xs text-slate-500 sm:block">
+                            {myOffice?.name
+                                ? `Operational overview for ${myOffice.name}`
+                                : 'Operational overview for your office'}
                         </p>
                     </div>
                     <Button
                         variant="secondary"
-                        onClick={() =>
-                            router.visit(route('head.monitor.index'))
-                        }
+                        onClick={() => router.visit(route('head.monitor.index'))}
                         aria-label="Monitor Documents"
                     >
                         <FileText className="h-4 w-4" />
-                        <span className="hidden sm:inline">
-                            Monitor Documents
-                        </span>
+                        <span className="hidden sm:inline">Monitor Documents</span>
                     </Button>
                 </div>
             }
@@ -55,21 +66,41 @@ export default function OfficeHeadDashboard({
             <Head title="Office Head Dashboard" />
 
             <div className="mx-auto max-w-7xl space-y-3 px-3 py-3 sm:space-y-4 sm:px-6 sm:py-5 lg:px-8">
+                {/* ============ TABS ============ */}
+                <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                    <TabButton
+                        active={isMine}
+                        onClick={() => switchTab('mine')}
+                        icon={FileText}
+                        label="Registered by My Office"
+                        shortLabel="My Office"
+                        count={tabCounts.mine ?? 0}
+                    />
+                    <TabButton
+                        active={!isMine}
+                        onClick={() => switchTab('routed')}
+                        icon={Route}
+                        label="Routed Through My Office"
+                        shortLabel="Routed"
+                        count={tabCounts.routed ?? 0}
+                    />
+                </div>
+
                 {/* ============ OPERATIONAL STRIP ============ */}
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
                     <MetricTile
-                        label="Awaiting receipt"
+                        label={isMine ? 'Awaiting at next office' : 'Awaiting my receipt'}
                         value={operational.awaiting_receipt ?? 0}
                         icon={Clock}
                         tone="sky"
-                        href={route('head.documents.index')}
+                        href={route('head.documents.index', { tab })}
                     />
                     <MetricTile
-                        label="In hand"
+                        label={isMine ? 'Held by other offices' : 'In my hands'}
                         value={operational.in_hand ?? 0}
                         icon={Inbox}
                         tone="indigo"
-                        href={route('head.documents.index')}
+                        href={route('head.documents.index', { tab })}
                     />
                     <MetricTile
                         label="Overdue"
@@ -77,6 +108,7 @@ export default function OfficeHeadDashboard({
                         icon={AlertTriangle}
                         tone="red"
                         href={route('head.documents.index', {
+                            tab,
                             overdue_only: 1,
                         })}
                         emphasize={(operational.overdue ?? 0) > 0}
@@ -86,13 +118,12 @@ export default function OfficeHeadDashboard({
                         value={operational.completed_this_week ?? 0}
                         icon={CheckCircle2}
                         tone="emerald"
-                        href={route('head.documents.index')}
+                        href={route('head.documents.index', { tab })}
                     />
                 </div>
 
                 {/* ============ CHARTS ROW ============ */}
                 <div className="grid gap-3 lg:grid-cols-3">
-                    {/* Activity line chart */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white lg:col-span-2">
                         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
                             <div>
@@ -100,7 +131,9 @@ export default function OfficeHeadDashboard({
                                     Activity — last 14 days
                                 </h3>
                                 <p className="mt-0.5 text-[11px] text-slate-500">
-                                    Documents created vs completed
+                                    {isMine
+                                        ? 'Documents your office created vs completed'
+                                        : 'Documents routed through your office'}
                                 </p>
                             </div>
                             <div className="flex items-center gap-3 text-[11px]">
@@ -113,14 +146,15 @@ export default function OfficeHeadDashboard({
                         </div>
                     </section>
 
-                    {/* Status donut */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                         <header className="border-b border-slate-100 px-4 py-3">
                             <h3 className="text-sm font-semibold text-slate-800">
                                 Status distribution
                             </h3>
                             <p className="mt-0.5 text-[11px] text-slate-500">
-                                All documents in your office
+                                {isMine
+                                    ? 'Documents registered by your office'
+                                    : 'Documents routed through your office'}
                             </p>
                         </header>
                         <div className="p-4">
@@ -131,41 +165,45 @@ export default function OfficeHeadDashboard({
 
                 {/* ============ BOTTOM ROW ============ */}
                 <div className="grid gap-3 lg:grid-cols-3">
-                    {/* Destination office performance */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white lg:col-span-2">
                         <header className="border-b border-slate-100 px-4 py-3">
                             <h3 className="text-sm font-semibold text-slate-800">
-                                Destination offices
+                                {isMine
+                                    ? 'Destination offices'
+                                    : 'Source offices'}
                             </h3>
                             <p className="mt-0.5 text-[11px] text-slate-500">
-                                Where your documents go most — and how fast
-                                they're handled
+                                {isMine
+                                    ? 'Where your documents go most, and how fast they are handled'
+                                    : 'Which offices route documents through your office'}
                             </p>
                         </header>
                         <div className="p-4">
                             <OfficePerformanceList
                                 offices={officePerformance}
+                                showAvgHours={isMine}
                             />
                         </div>
                     </section>
 
-                    {/* Compact counters */}
                     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                       <header className="border-b border-slate-100 px-4 py-3">
-    <div className="flex items-center justify-between gap-2">
-        <div>
-            <h3 className="text-sm font-semibold text-slate-800">
-                Quick totals
-            </h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-                Current snapshot
-            </p>
-        </div>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-700">
-            {counts.total ?? 0}
-        </span>
-    </div>
-</header>
+                        <header className="border-b border-slate-100 px-4 py-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-slate-800">
+                                        Quick totals
+                                    </h3>
+                                    <p className="mt-0.5 text-[11px] text-slate-500">
+                                        {isMine
+                                            ? 'Your registered documents'
+                                            : 'Routed through your office'}
+                                    </p>
+                                </div>
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-700">
+                                    {counts.total ?? 0}
+                                </span>
+                            </div>
+                        </header>
                         <div className="grid grid-cols-2 gap-px bg-slate-100">
                             <CountCell
                                 label="Total"
@@ -212,7 +250,38 @@ export default function OfficeHeadDashboard({
 }
 
 /* ================================================================== */
-/*  ACTIVITY LINE CHART (SVG)                                          */
+/*  TABS                                                              */
+/* ================================================================== */
+
+function TabButton({ active, onClick, icon: Icon, label, shortLabel, count }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition sm:gap-2 sm:px-3 sm:py-2 sm:text-sm ${
+                active
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-50'
+            }`}
+        >
+            <Icon className="h-3.5 w-3.5 flex-shrink-0 sm:h-4 sm:w-4" />
+            <span className="hidden truncate sm:inline">{label}</span>
+            <span className="truncate sm:hidden">{shortLabel}</span>
+            <span
+                className={`ml-0.5 inline-flex h-4 min-w-[18px] flex-shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums ${
+                    active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                }`}
+            >
+                {count > 99 ? '99+' : count}
+            </span>
+        </button>
+    );
+}
+
+/* ================================================================== */
+/*  ACTIVITY LINE CHART                                               */
 /* ================================================================== */
 
 function ActivityChart({ data = [] }) {
@@ -251,8 +320,7 @@ function ActivityChart({ data = [] }) {
         ...data.flatMap((d) => [d.created, d.completed])
     );
 
-    const x = (i) =>
-        pad.left + (i / Math.max(1, data.length - 1)) * innerW;
+    const x = (i) => pad.left + (i / Math.max(1, data.length - 1)) * innerW;
     const y = (v) => pad.top + innerH - (v / maxVal) * innerH;
 
     const createdLine = data
@@ -261,11 +329,10 @@ function ActivityChart({ data = [] }) {
     const completedLine = data
         .map((d, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(d.completed)}`)
         .join(' ');
-    const createdArea = `${createdLine} L ${x(
-        data.length - 1
-    )} ${pad.top + innerH} L ${x(0)} ${pad.top + innerH} Z`;
+    const createdArea = `${createdLine} L ${x(data.length - 1)} ${
+        pad.top + innerH
+    } L ${x(0)} ${pad.top + innerH} Z`;
 
-    // Y-axis ticks
     const yTicks = [0, 0.5, 1].map((r) => ({
         y: pad.top + innerH - r * innerH,
         value: Math.round(maxVal * r),
@@ -279,13 +346,12 @@ function ActivityChart({ data = [] }) {
             aria-label="Daily document activity"
         >
             <defs>
-                <linearGradient id="createdArea" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="headCreatedArea" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.28" />
                     <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
                 </linearGradient>
             </defs>
 
-            {/* Gridlines */}
             {yTicks.map((t) => (
                 <g key={t.y}>
                     <line
@@ -309,10 +375,8 @@ function ActivityChart({ data = [] }) {
                 </g>
             ))}
 
-            {/* Created area */}
-            <path d={createdArea} fill="url(#createdArea)" />
+            <path d={createdArea} fill="url(#headCreatedArea)" />
 
-            {/* Created line */}
             <path
                 d={createdLine}
                 fill="none"
@@ -322,7 +386,6 @@ function ActivityChart({ data = [] }) {
                 strokeLinejoin="round"
             />
 
-            {/* Completed line */}
             <path
                 d={completedLine}
                 fill="none"
@@ -333,7 +396,6 @@ function ActivityChart({ data = [] }) {
                 strokeDasharray="4 3"
             />
 
-            {/* Points on created */}
             {data.map((d, i) => (
                 <circle
                     key={i}
@@ -346,7 +408,6 @@ function ActivityChart({ data = [] }) {
                 />
             ))}
 
-            {/* X-axis labels — every other day */}
             {data.map((d, i) => {
                 if (i % 2 !== 0 && i !== data.length - 1) return null;
                 return (
@@ -379,7 +440,7 @@ function Legend({ color, label }) {
 }
 
 /* ================================================================== */
-/*  STATUS DONUT (SVG)                                                 */
+/*  STATUS DONUT                                                      */
 /* ================================================================== */
 
 function StatusDonut({ data = [] }) {
@@ -392,7 +453,6 @@ function StatusDonut({ data = [] }) {
 
     return (
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:flex-col">
-            {/* Donut */}
             <div className="relative">
                 <svg
                     viewBox={`0 0 ${size} ${size}`}
@@ -400,7 +460,6 @@ function StatusDonut({ data = [] }) {
                     role="img"
                     aria-label="Status distribution"
                 >
-                    {/* Base ring */}
                     <circle
                         cx={cx}
                         cy={cy}
@@ -410,7 +469,6 @@ function StatusDonut({ data = [] }) {
                         strokeWidth="16"
                     />
 
-                    {/* Slices */}
                     {total > 0 &&
                         (() => {
                             let offset = 0;
@@ -437,7 +495,6 @@ function StatusDonut({ data = [] }) {
                             });
                         })()}
 
-                    {/* Center total */}
                     <text
                         x={cx}
                         y={cy - 2}
@@ -459,7 +516,6 @@ function StatusDonut({ data = [] }) {
                 </svg>
             </div>
 
-            {/* Legend */}
             <ul className="w-full space-y-1.5">
                 {data.map((slice) => {
                     const pct = total
@@ -496,10 +552,10 @@ function StatusDonut({ data = [] }) {
 }
 
 /* ================================================================== */
-/*  OFFICE PERFORMANCE — horizontal bars                               */
+/*  OFFICE PERFORMANCE                                                */
 /* ================================================================== */
 
-function OfficePerformanceList({ offices = [] }) {
+function OfficePerformanceList({ offices = [], showAvgHours = true }) {
     if (!offices.length) {
         return (
             <p className="py-6 text-center text-xs text-slate-400">
@@ -514,6 +570,9 @@ function OfficePerformanceList({ offices = [] }) {
         <ul className="space-y-3">
             {offices.map((office) => {
                 const pct = (office.total / maxTotal) * 100;
+                const hasAvg =
+                    showAvgHours && office.avg_hours > 0;
+
                 return (
                     <li key={office.name} className="space-y-1">
                         <div className="flex items-center justify-between gap-3 text-xs">
@@ -527,10 +586,12 @@ function OfficePerformanceList({ offices = [] }) {
                                     {office.total} doc
                                     {office.total !== 1 ? 's' : ''}
                                 </span>
-                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                                    <TrendingUp className="h-3 w-3 text-slate-400" />
-                                    {office.avg_hours}h avg
-                                </span>
+                                {hasAvg && (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                        <TrendingUp className="h-3 w-3 text-slate-400" />
+                                        {office.avg_hours}h avg
+                                    </span>
+                                )}
                             </span>
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
@@ -547,26 +608,14 @@ function OfficePerformanceList({ offices = [] }) {
 }
 
 /* ================================================================== */
-/*  SMALL TILES + CELLS                                                */
+/*  SMALL TILES + CELLS                                               */
 /* ================================================================== */
 
 const METRIC_TONES = {
-    sky: {
-        chip: 'bg-sky-50 text-sky-700',
-        ring: 'hover:border-sky-300',
-    },
-    indigo: {
-        chip: 'bg-indigo-50 text-indigo-700',
-        ring: 'hover:border-indigo-300',
-    },
-    emerald: {
-        chip: 'bg-emerald-50 text-emerald-700',
-        ring: 'hover:border-emerald-300',
-    },
-    red: {
-        chip: 'bg-red-50 text-red-700',
-        ring: 'hover:border-red-300',
-    },
+    sky:     { chip: 'bg-sky-50 text-sky-700',         ring: 'hover:border-sky-300' },
+    indigo:  { chip: 'bg-indigo-50 text-indigo-700',   ring: 'hover:border-indigo-300' },
+    emerald: { chip: 'bg-emerald-50 text-emerald-700', ring: 'hover:border-emerald-300' },
+    red:     { chip: 'bg-red-50 text-red-700',         ring: 'hover:border-red-300' },
 };
 
 function MetricTile({ label, value, icon: Icon, tone = 'sky', href, emphasize }) {
@@ -607,12 +656,12 @@ function MetricTile({ label, value, icon: Icon, tone = 'sky', href, emphasize })
 }
 
 const COUNT_TONES = {
-    slate: 'text-slate-700 bg-slate-100',
-    sky: 'text-sky-700 bg-sky-50',
-    indigo: 'text-indigo-700 bg-indigo-50',
+    slate:   'text-slate-700 bg-slate-100',
+    sky:     'text-sky-700 bg-sky-50',
+    indigo:  'text-indigo-700 bg-indigo-50',
     emerald: 'text-emerald-700 bg-emerald-50',
-    amber: 'text-amber-700 bg-amber-50',
-    red: 'text-red-700 bg-red-50',
+    amber:   'text-amber-700 bg-amber-50',
+    red:     'text-red-700 bg-red-50',
 };
 
 function CountCell({ label, value, icon: Icon, tone = 'slate' }) {

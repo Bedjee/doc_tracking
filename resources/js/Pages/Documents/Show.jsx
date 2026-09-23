@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import {
     ArrowLeft,
@@ -6,7 +6,9 @@ import {
     Clock,
     FileText,
     History,
+    Info,
     Printer,
+    Search,
     Undo2,
 } from 'lucide-react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
@@ -37,13 +39,71 @@ export default function Show({
     const [modal, setModal] = useState(null);
     const [tab, setTab] = useState('details');
     const [remarks, setRemarks] = useState('');
-    const [returnOfficeId, setReturnOfficeId] = useState('');
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState(false);
 
+    // Return-destination state
+    const [returnTarget, setReturnTarget] = useState('previous'); // 'previous' | 'other'
+    const [returnOtherOfficeId, setReturnOtherOfficeId] = useState('');
+
     const lastEvent = document.events?.[0];
-    // Single source of truth — every timing component below respects this.
     const isCompleted = !!document.completed_at;
+
+    /* -------------------------------------------------------------- */
+    /*  Determine the office that forwarded this document to us        */
+    /* -------------------------------------------------------------- */
+    const previousOffice = useMemo(() => {
+        const routes = document.routes ?? [];
+        if (routes.length < 2) return null;
+
+        const sorted = [...routes].sort(
+            (a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)
+        );
+
+        // Preferred: the step our office currently holds (RECEIVED, not forwarded)
+        let currentIdx = sorted.findIndex(
+            (r) =>
+                r.office?.id === document.current_office_id &&
+                r.status === 'RECEIVED' &&
+                !r.forwarded_at
+        );
+
+        // Fallback: the highest-sequence step still RECEIVED
+        if (currentIdx === -1) {
+            for (let i = sorted.length - 1; i >= 0; i--) {
+                if (sorted[i].status === 'RECEIVED' && !sorted[i].forwarded_at) {
+                    currentIdx = i;
+                    break;
+                }
+            }
+        }
+
+        if (currentIdx <= 0) return null;
+
+        return sorted[currentIdx - 1]?.office ?? null;
+    }, [document.routes, document.current_office_id]);
+
+    // Offices excluding the previously-suggested one — no point in listing
+    // it twice.
+    const otherOffices = useMemo(
+        () =>
+            offices.filter(
+                (o) => !previousOffice || Number(o.id) !== Number(previousOffice.id)
+            ),
+        [offices, previousOffice]
+    );
+
+    const effectiveReturnOfficeId =
+        returnTarget === 'previous'
+            ? previousOffice?.id
+            : returnOtherOfficeId;
+
+    const returnValid =
+        !!effectiveReturnOfficeId && reason.trim().length > 0;
+
+    /* -------------------------------------------------------------- */
+    /*  Actions                                                        */
+    /* -------------------------------------------------------------- */
 
     function post(url, payload) {
         setBusy(true);
@@ -54,11 +114,53 @@ export default function Show({
                 setModal(null);
                 setRemarks('');
                 setReason('');
-                setReturnOfficeId('');
+                setReturnOtherOfficeId('');
             },
             onError: (e) => toast.error(Object.values(e)[0] ?? 'Action failed.'),
             onFinish: () => setBusy(false),
         });
+    }
+
+    function openReturn() {
+        setReturnTarget(previousOffice ? 'previous' : 'other');
+        setReturnOtherOfficeId('');
+        setReason('');
+        setRemarks('');
+        setModal('return');
+    }
+
+    function submitReturn() {
+        if (!returnValid) {
+            if (!effectiveReturnOfficeId) {
+                toast.error('Please select a return destination.');
+            } else if (!reason.trim()) {
+                toast.error('Please provide a reason for the return.');
+            }
+            return;
+        }
+
+        setBusy(true);
+        router.post(
+            route('documents.return', document.id),
+            {
+                return_office_id: effectiveReturnOfficeId,
+                reason: reason.trim(),
+                remarks: remarks.trim() || null,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.warning('Document returned.');
+                    setModal(null);
+                    setReason('');
+                    setRemarks('');
+                    setReturnOtherOfficeId('');
+                },
+                onError: (e) =>
+                    toast.error(Object.values(e)[0] ?? 'Unable to return.'),
+                onFinish: () => setBusy(false),
+            }
+        );
     }
 
     const timingRoutes = (document.routes ?? []).filter(
@@ -150,7 +252,13 @@ export default function Show({
                         <>
                             <QrCard qrPayload={qrPayload} />
                             {hasActions && (
-                                <ActionsCard can={can} onOpen={(m) => setModal(m)} />
+                                <ActionsCard
+                                    can={can}
+                                    onOpen={(m) => {
+                                        if (m === 'return') openReturn();
+                                        else setModal(m);
+                                    }}
+                                />
                             )}
                         </>
                     )}
@@ -174,7 +282,13 @@ export default function Show({
                     <div className="space-y-4">
                         <QrCard qrPayload={qrPayload} />
                         {hasActions && (
-                            <ActionsCard can={can} onOpen={(m) => setModal(m)} />
+                            <ActionsCard
+                                can={can}
+                                onOpen={(m) => {
+                                    if (m === 'return') openReturn();
+                                    else setModal(m);
+                                }}
+                            />
                         )}
                         <ProcessingTimeCardSection
                             timingRoutes={timingRoutes}
@@ -184,8 +298,7 @@ export default function Show({
                 </div>
             </div>
 
-            {/* ---------- Modals ---------- */}
-
+            {/* ---------- Receive modal ---------- */}
             <Modal
                 show={modal === 'receive'}
                 onClose={() => setModal(null)}
@@ -235,6 +348,7 @@ export default function Show({
                 />
             </Modal>
 
+            {/* ---------- Forward modal ---------- */}
             <Modal
                 show={modal === 'forward'}
                 onClose={() => setModal(null)}
@@ -267,63 +381,151 @@ export default function Show({
                 />
             </Modal>
 
-            <Modal
-                show={modal === 'return'}
-                onClose={() => setModal(null)}
-                title="Return document"
-                footer={
-                    <>
-                        <Button variant="secondary" onClick={() => setModal(null)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="warning"
-                            loading={busy}
-                            onClick={() =>
-                                post(route('documents.return', document.id), {
-                                    return_office_id: returnOfficeId,
-                                    reason,
-                                    remarks,
-                                })
-                            }
-                        >
-                            Return document
-                        </Button>
-                    </>
-                }
+            {/* ---------- Return modal (redesigned) ---------- */}
+         {/* ---------- Return modal ---------- */}
+<Modal
+    show={modal === 'return'}
+    onClose={() => setModal(null)}
+    title="Return document"
+    maxWidth="max-w-md"
+    footer={
+        <>
+            <Button variant="secondary" onClick={() => setModal(null)}>
+                Cancel
+            </Button>
+            <Button
+                variant="warning"
+                loading={busy}
+                disabled={!returnValid}
+                onClick={submitReturn}
             >
-                <div className="space-y-3">
-                    <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Return to office *
-                        </label>
-                        <select
-                            value={returnOfficeId}
-                            onChange={(e) => setReturnOfficeId(e.target.value)}
-                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                            <option value="">— Select office —</option>
-                            {offices.map((o) => (
-                                <option key={o.id} value={o.id}>
-                                    {o.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-600">
-                            Reason *
-                        </label>
-                        <textarea
-                            rows={3}
-                            value={reason}
-                            onChange={(e) => setReason(e.target.value)}
-                            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                    </div>
-                </div>
-            </Modal>
+                Return
+            </Button>
+        </>
+    }
+>
+    <div className="space-y-4">
+        {/* Document summary — single line */}
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <FileText className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+            <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-slate-800">
+                    {document.title}
+                </p>
+                <p className="truncate font-mono text-[10px] text-slate-500">
+                    {document.tracking_number}
+                </p>
+            </div>
+        </div>
 
+        {/* Return destination */}
+        <div>
+            <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Return to
+                </span>
+                <span className="text-[10px] text-red-500">*</span>
+            </div>
+
+            <div className="space-y-1.5">
+                {previousOffice && (
+                    <ReturnTargetCard
+                        selected={returnTarget === 'previous'}
+                        onSelect={() => setReturnTarget('previous')}
+                        eyebrow="Suggested"
+                        title={previousOffice.name}
+                        subtitle="Office that sent this document"
+                        tone="blue"
+                    />
+                )}
+
+                <ReturnTargetCard
+                    selected={returnTarget === 'other'}
+                    onSelect={() => setReturnTarget('other')}
+                    title="Other office"
+                    subtitle="Choose from available offices"
+                    tone="slate"
+                />
+            </div>
+
+            {returnTarget === 'other' && (
+                <div className="mt-2">
+                    <InlineOfficePicker
+                        offices={otherOffices}
+                        value={returnOtherOfficeId}
+                        onChange={setReturnOtherOfficeId}
+                    />
+                </div>
+            )}
+        </div>
+
+        {/* Reason */}
+        <div>
+            <label
+                htmlFor="return-reason"
+                className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+                <span>
+                    Reason <span className="text-red-500">*</span>
+                </span>
+                <span className="font-normal normal-case tracking-normal text-slate-400">
+                    Added to audit trail
+                </span>
+            </label>
+            <textarea
+                id="return-reason"
+                rows={2}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Incomplete requirements, wrong recipient"
+                className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+        </div>
+
+        {/* Optional remarks */}
+        <div>
+            <label
+                htmlFor="return-remarks"
+                className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+                <span>Remarks</span>
+                <span className="font-normal normal-case tracking-normal text-slate-400">
+                    Optional
+                </span>
+            </label>
+            <textarea
+                id="return-remarks"
+                rows={2}
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Anything else the office should know"
+                className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+        </div>
+
+        {/* Compact summary strip */}
+        {effectiveReturnOfficeId && (
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-800">
+                <Info className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                <p>
+                    Routes to{' '}
+                    <strong className="font-semibold">
+                        {returnTarget === 'previous'
+                            ? previousOffice?.name
+                            : offices.find(
+                                  (o) =>
+                                      Number(o.id) ===
+                                      Number(returnOtherOfficeId)
+                              )?.name ?? 'the selected office'}
+                    </strong>
+                    . Past history is preserved.
+                </p>
+            </div>
+        )}
+    </div>
+</Modal>
+
+            {/* ---------- Cancel modal ---------- */}
             <Modal
                 show={modal === 'cancel'}
                 onClose={() => setModal(null)}
@@ -387,9 +589,208 @@ export default function Show({
     );
 }
 
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  RETURN — target option card                                        */
+/* ================================================================== */
+function ReturnTargetCard({
+    selected,
+    onSelect,
+    eyebrow = null,
+    title,
+    subtitle,
+    tone = 'slate',
+}) {
+    const TONES = {
+        blue: {
+            border: 'border-blue-500 bg-blue-50',
+            dot: 'border-blue-500 bg-blue-500',
+            eyebrow: 'bg-blue-100 text-blue-700',
+            title: 'text-blue-900',
+        },
+        slate: {
+            border: 'border-slate-800 bg-slate-50',
+            dot: 'border-slate-800 bg-slate-800',
+            eyebrow: 'bg-slate-100 text-slate-600',
+            title: 'text-slate-900',
+        },
+    };
+    const t = TONES[tone] ?? TONES.slate;
+
+    return (
+        <button
+            type="button"
+            onClick={onSelect}
+            aria-pressed={selected}
+            className={`flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition ${
+                selected
+                    ? t.border
+                    : 'border-slate-200 bg-white active:bg-slate-50'
+            }`}
+        >
+            {/* Radio indicator */}
+            <span
+                className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 transition ${
+                    selected ? t.dot : 'border-slate-300 bg-white'
+                }`}
+            >
+                {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+            </span>
+
+            {/* Content */}
+            <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                    {eyebrow && (
+                        <span
+                            className={`inline-flex flex-shrink-0 items-center rounded px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider ${t.eyebrow}`}
+                        >
+                            {eyebrow}
+                        </span>
+                    )}
+                    <span
+                        className={`truncate text-[13px] font-semibold ${
+                            selected ? t.title : 'text-slate-800'
+                        }`}
+                    >
+                        {title}
+                    </span>
+                </span>
+                {subtitle && (
+                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">
+                        {subtitle}
+                    </span>
+                )}
+            </span>
+        </button>
+    );
+}
+
+
+
+/* ================================================================== */
+/*  RETURN — inline searchable office picker                           */
+/* ================================================================== */
+
+function InlineOfficePicker({ offices = [], value, onChange }) {
+    const [query, setQuery] = useState('');
+
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return offices;
+        return offices.filter(
+            (o) =>
+                o.name?.toLowerCase().includes(q) ||
+                o.code?.toLowerCase().includes(q)
+        );
+    }, [offices, query]);
+
+    if (offices.length === 0) {
+        return (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center">
+                <p className="text-[11px] text-slate-500">
+                    No other offices available.
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+            {/* Search */}
+            <div className="border-b border-slate-100 p-1.5">
+                <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                    <input
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search offices…"
+                        className="w-full rounded-md border-0 bg-slate-50 py-1.5 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900/20"
+                    />
+                    {query && (
+                        <button
+                            type="button"
+                            onClick={() => setQuery('')}
+                            className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+                            aria-label="Clear"
+                        >
+                            <X className="h-2.5 w-2.5" />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* List */}
+            <div className="max-h-44 overflow-y-auto p-1">
+                {filtered.length === 0 ? (
+                    <p className="px-3 py-4 text-center text-[11px] text-slate-400">
+                        No matches.
+                    </p>
+                ) : (
+                    <ul className="space-y-0.5">
+                        {filtered.map((office) => {
+                            const selected =
+                                String(value) === String(office.id);
+                            return (
+                                <li key={office.id}>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            onChange(String(office.id))
+                                        }
+                                        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
+                                            selected
+                                                ? 'bg-blue-50 ring-1 ring-blue-500'
+                                                : 'hover:bg-slate-100 active:bg-slate-200'
+                                        }`}
+                                    >
+                                        <span
+                                            className={`flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border-2 transition ${
+                                                selected
+                                                    ? 'border-blue-500 bg-blue-500'
+                                                    : 'border-slate-300 bg-white'
+                                            }`}
+                                        >
+                                            {selected && (
+                                                <span className="h-1 w-1 rounded-full bg-white" />
+                                            )}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-xs font-medium text-slate-800">
+                                                {office.name}
+                                            </span>
+                                            {office.code && (
+                                                <span className="block truncate text-[10px] text-slate-500">
+                                                    {office.code}
+                                                </span>
+                                            )}
+                                        </span>
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/* ================================================================== */
 /*  Section components                                                 */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+
+function DocumentMini({ doc }) {
+    return (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="truncate text-sm font-semibold text-slate-800">
+                {doc.title}
+            </p>
+            <p className="mt-0.5 font-mono text-xs text-slate-500">
+                {doc.tracking_number}
+            </p>
+        </div>
+    );
+}
 
 function DocumentInfoCard({ document }) {
     return (
@@ -476,8 +877,6 @@ function DocumentInfoCard({ document }) {
 }
 
 function CurrentStatusCard({ document, lastEvent, frozen = false }) {
-    // The document is complete — show only final state. No "current
-    // location", no "authorized destination", no live timer.
     if (frozen) {
         return (
             <Card title="Final Status" icon={Building2}>
@@ -661,9 +1060,6 @@ function OfficeTimingTable({ routes, frozen = false }) {
                             const isOverdue = !frozen && r.is_overdue;
                             const isOrigin = !r.received_at && !!r.forwarded_at;
 
-                            // On a completed document, the final row is what
-                            // closes the route. Show "Completed" instead of
-                            // "Still held".
                             const isFinalCompletedRow =
                                 frozen && isLastRow && !!r.received_at;
 

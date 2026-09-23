@@ -7,17 +7,18 @@ import {
     Check,
     ChevronDown,
     Clock,
+    Hourglass,
     ImagePlus,
     Loader2,
     Lock,
     Plus,
-    RotateCcw,
     ScanText,
     Search,
     Sparkles,
     Trash2,
     Undo2,
     X,
+    Zap,
 } from 'lucide-react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Button from '@/Components/UI/Button';
@@ -25,7 +26,6 @@ import { useToast } from '@/Components/UI/Toast';
 
 export default function Create({
     offices = [],
-    types = [],
     categories = [],
     defaultOriginatingOfficeId = null,
 }) {
@@ -38,9 +38,7 @@ export default function Create({
 
     const { data, setData, post, processing, errors } = useForm({
         title: '',
-        document_type_id: '',
         transaction_category_id: '',
-        reference_number: '',
         document_date: '',
         subject: '',
         originating_office_id: defaultOriginatingOfficeId ?? '',
@@ -56,8 +54,6 @@ export default function Create({
         [offices]
     );
 
-    // Destinations exclude the user's own office — you can't route a
-    // document back to yourself through the normal flow.
     const selectableOffices = useMemo(
         () =>
             offices.filter(
@@ -66,24 +62,6 @@ export default function Create({
         [offices, data.originating_office_id]
     );
 
-    const selectedCategory = useMemo(
-        () =>
-            categories.find(
-                (c) => String(c.id) === String(data.transaction_category_id)
-            ),
-        [categories, data.transaction_category_id]
-    );
-
-    const processingDaysLabel = useMemo(() => {
-        if (!selectedCategory) return '';
-        const { min_days, max_days } = selectedCategory;
-        if (min_days === max_days) {
-            return `${min_days} day${min_days > 1 ? 's' : ''}`;
-        }
-        return `${min_days}–${max_days} days`;
-    }, [selectedCategory]);
-
-    // If the user has no office assigned, we cannot create documents.
     const hasOffice = !!data.originating_office_id;
 
     /* ---------------- OCR ---------------- */
@@ -128,10 +106,6 @@ export default function Create({
                     json.document_image_path ?? data.document_image_path,
                 ocr_raw_text: json.raw_text ?? data.ocr_raw_text ?? '',
                 title: !data.title && s.title ? s.title : data.title,
-                reference_number:
-                    !data.reference_number && s.reference_number
-                        ? s.reference_number
-                        : data.reference_number,
                 document_date:
                     !data.document_date && s.document_date
                         ? s.document_date
@@ -142,12 +116,7 @@ export default function Create({
 
             setOcrRaw(json.raw_text ?? '');
 
-            if (
-                s.title ||
-                s.reference_number ||
-                s.document_date ||
-                s.subject
-            ) {
+            if (s.title || s.document_date || s.subject) {
                 toast.success(
                     'OCR finished. Review and confirm the detected information.'
                 );
@@ -329,113 +298,44 @@ export default function Create({
                                 )}
                             </Field>
 
-                            <div className="grid gap-4 sm:grid-cols-2">
-                                <Field
-                                    label="Reference Number"
-                                    error={errors.reference_number}
-                                >
-                                    <input
-                                        type="text"
-                                        value={data.reference_number}
-                                        onChange={(e) =>
-                                            setData(
-                                                'reference_number',
-                                                e.target.value
-                                            )
-                                        }
-                                        className="input"
-                                    />
-                                </Field>
-                                <Field
-                                    label="Document Date"
-                                    error={errors.document_date}
-                                >
-                                    <input
-                                        type="date"
-                                        value={data.document_date}
-                                        onChange={(e) =>
-                                            setData(
-                                                'document_date',
-                                                e.target.value
-                                            )
-                                        }
-                                        className="input"
-                                    />
-                                </Field>
-                            </div>
-
                             <Field
-                                label="Document Type"
-                                error={errors.document_type_id}
+                                label="Document Date"
+                                error={errors.document_date}
                             >
-                                <select
-                                    value={data.document_type_id}
+                                <input
+                                    type="date"
+                                    value={data.document_date}
                                     onChange={(e) =>
-                                        setData(
-                                            'document_type_id',
-                                            e.target.value
-                                        )
+                                        setData('document_date', e.target.value)
                                     }
                                     className="input"
-                                >
-                                    <option value="">— Select type —</option>
-                                    {types.map((t) => (
-                                        <option key={t.id} value={t.id}>
-                                            {t.name}
-                                        </option>
-                                    ))}
-                                </select>
+                                />
                             </Field>
                         </div>
                     </div>
 
-                    {/* ---------- Transaction Category ---------- */}
+                    {/* ---------- Transaction Category (rich picker) ---------- */}
                     <div className="mt-4">
-                        <Field
-                            label="Transaction Category"
-                            error={errors.transaction_category_id}
-                            required
-                        >
-                            <select
-                                value={data.transaction_category_id}
-                                onChange={(e) =>
-                                    setData({
-                                        ...data,
-                                        transaction_category_id: e.target.value,
-                                    })
-                                }
-                                className="input"
-                            >
-                                <option value="">— Select category —</option>
-                                {categories.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name} ·{' '}
-                                        {c.min_days === c.max_days
-                                            ? `${c.min_days} day${
-                                                  c.min_days > 1 ? 's' : ''
-                                              }`
-                                            : `${c.min_days}–${c.max_days} days`}{' '}
-                                        per office
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
+                        <span className="mb-1 block text-xs font-medium text-slate-600">
+                            Transaction Category{' '}
+                            <span className="text-red-500">*</span>
+                        </span>
 
-                        {selectedCategory && (
-                            <div className="mt-2 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-                                <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                                <div>
-                                    <p className="font-semibold">
-                                        {selectedCategory.name}
-                                    </p>
-                                    <p className="mt-0.5">
-                                        Each office in the route will have{' '}
-                                        <strong>{processingDaysLabel}</strong> to
-                                        process this document, counted from the
-                                        moment it is received.
-                                    </p>
-                                </div>
-                            </div>
+                        <CategoryPicker
+                            categories={categories}
+                            value={data.transaction_category_id}
+                            onChange={(id) =>
+                                setData({
+                                    ...data,
+                                    transaction_category_id: id,
+                                })
+                            }
+                        />
+
+                        {errors.transaction_category_id && (
+                            <span className="mt-1 block text-xs text-red-600">
+                                {errors.transaction_category_id}
+                            </span>
                         )}
                     </div>
 
@@ -558,7 +458,6 @@ export default function Create({
                                 </li>
                             )}
 
-                            {/* ---------- Return to Sender final step ---------- */}
                             {data.return_to_sender && data.route.length > 0 && (
                                 <li className="flex items-center gap-2">
                                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-300">
@@ -575,7 +474,6 @@ export default function Create({
                             )}
                         </ol>
 
-                        {/* ---------- Office picker ---------- */}
                         <div className="mt-4">
                             <OfficePicker
                                 offices={selectableOffices}
@@ -590,7 +488,6 @@ export default function Create({
                             </p>
                         )}
 
-                        {/* ---------- Return to Sender option ---------- */}
                         <div className="mt-4 border-t border-slate-200 pt-4">
                             <label
                                 className={`flex select-none items-start gap-3 ${
@@ -714,12 +611,14 @@ export default function Create({
                 }
 
                 @media (max-width: 639px) {
-                    .office-picker-panel {
+                    .office-picker-panel,
+                    .category-picker-panel {
                         animation: slide-up 220ms cubic-bezier(0.16, 1, 0.3, 1);
                     }
                 }
                 @media (min-width: 640px) {
-                    .office-picker-panel {
+                    .office-picker-panel,
+                    .category-picker-panel {
                         animation: fade-in 150ms ease-out;
                     }
                 }
@@ -768,6 +667,341 @@ function IconBtn({ children, onClick, disabled, danger, label }) {
     );
 }
 
+/* ================================================================== */
+/*  TRANSACTION CATEGORY PICKER                                        */
+/* ================================================================== */
+
+/**
+ * Infers a visual tier from the category's day range. This means any
+ * category the admin creates automatically gets the right color and icon
+ * without needing extra database columns.
+ */
+function tierForDays(minDays) {
+    if (minDays <= 3) {
+        return {
+            icon: Zap,
+            accent: 'bg-emerald-500',
+            chip: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+            chipSoft: 'bg-emerald-100 text-emerald-800',
+            ring: 'focus:ring-emerald-500/30',
+            selectedRing: 'ring-emerald-500',
+            softBg: 'bg-emerald-50/60',
+        };
+    }
+    if (minDays <= 7) {
+        return {
+            icon: Clock,
+            accent: 'bg-sky-500',
+            chip: 'bg-sky-50 text-sky-700 ring-sky-200',
+            chipSoft: 'bg-sky-100 text-sky-800',
+            ring: 'focus:ring-sky-500/30',
+            selectedRing: 'ring-sky-500',
+            softBg: 'bg-sky-50/60',
+        };
+    }
+    return {
+        icon: Hourglass,
+        accent: 'bg-amber-500',
+        chip: 'bg-amber-50 text-amber-700 ring-amber-200',
+        chipSoft: 'bg-amber-100 text-amber-800',
+        ring: 'focus:ring-amber-500/30',
+        selectedRing: 'ring-amber-500',
+        softBg: 'bg-amber-50/60',
+    };
+}
+
+function formatRange(minDays, maxDays) {
+    if (!minDays && !maxDays) return '—';
+    if (minDays === maxDays) {
+        return `${minDays} day${minDays > 1 ? 's' : ''}`;
+    }
+    return `${minDays}–${maxDays} days`;
+}
+
+function CategoryPicker({ categories = [], value, onChange }) {
+    const [open, setOpen] = useState(false);
+
+    const selected = useMemo(
+        () =>
+            categories.find((c) => String(c.id) === String(value)) ?? null,
+        [categories, value]
+    );
+
+    // Esc closes + body scroll lock — same behaviour as OfficePicker.
+    useEffect(() => {
+        if (!open) return;
+        const onKey = (e) => e.key === 'Escape' && setOpen(false);
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = prev;
+        };
+    }, [open]);
+
+    function choose(id) {
+        onChange(String(id));
+        setOpen(false);
+    }
+
+    /* -------- trigger -------- */
+    const TriggerIcon = selected
+        ? tierForDays(selected.min_days).icon
+        : Clock;
+    const triggerTier = selected ? tierForDays(selected.min_days) : null;
+
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                className={`group relative flex w-full items-center gap-3 rounded-lg border bg-white px-3 py-2.5 text-left transition focus:outline-none focus:ring-2 ${
+                    selected
+                        ? 'border-slate-300 hover:border-slate-400 hover:bg-slate-50 focus:ring-slate-900/10'
+                        : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50 focus:ring-slate-900/10'
+                }`}
+            >
+                {/* Left: icon bubble */}
+                <span
+                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${
+                        selected
+                            ? triggerTier.chip
+                            : 'bg-slate-100 text-slate-500'
+                    }`}
+                >
+                    <TriggerIcon className="h-5 w-5" strokeWidth={2} />
+                </span>
+
+                {/* Middle: name + subline */}
+                <span className="min-w-0 flex-1">
+                    {selected ? (
+                        <>
+                            <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span className="truncate text-sm font-semibold text-slate-800">
+                                    {selected.name}
+                                </span>
+                                <span
+                                    className={`inline-flex flex-shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${
+                                        triggerTier.chip
+                                    }`}
+                                >
+                                    {formatRange(
+                                        selected.min_days,
+                                        selected.max_days
+                                    )}
+                                </span>
+                            </span>
+                            <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                                {formatRange(
+                                    selected.min_days,
+                                    selected.max_days
+                                )}{' '}
+                                per office · counted from receipt
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <span className="block text-sm font-medium text-slate-700">
+                                Select a transaction category
+                            </span>
+                            <span className="mt-0.5 block text-[11px] text-slate-500">
+                                Sets the processing window for every office in
+                                the route
+                            </span>
+                        </>
+                    )}
+                </span>
+
+                {/* Right: chevron */}
+                <ChevronDown
+                    className={`h-4 w-4 flex-shrink-0 transition-transform duration-200 ${
+                        open
+                            ? 'rotate-180 text-slate-600'
+                            : 'text-slate-400 group-hover:text-slate-600'
+                    }`}
+                />
+            </button>
+
+            {/* -------- panel -------- */}
+            {open && (
+                <div
+                    className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Select transaction category"
+                >
+                    <div
+                        className="animate-fade-in absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+                        onClick={() => setOpen(false)}
+                    />
+
+                    <div className="category-picker-panel relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/5 sm:max-h-[80vh] sm:rounded-2xl">
+                        {/* Mobile drag handle */}
+                        <div className="flex justify-center pt-2.5 sm:hidden">
+                            <div className="h-1 w-10 rounded-full bg-slate-300" />
+                        </div>
+
+                        {/* Header */}
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
+                            <div className="min-w-0">
+                                <h3 className="text-sm font-semibold text-slate-800">
+                                    Choose a transaction category
+                                </h3>
+                                <p className="mt-0.5 text-[11px] text-slate-500">
+                                    Determines the processing window for every
+                                    office in the route
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setOpen(false)}
+                                className="-mr-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                                aria-label="Close"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+
+                        {/* Options */}
+                        <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+                            {categories.length === 0 ? (
+                                <div className="flex flex-col items-center gap-2 py-12 text-center">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                                        <Clock className="h-4 w-4" />
+                                    </div>
+                                    <p className="text-sm font-medium text-slate-700">
+                                        No categories configured
+                                    </p>
+                                    <p className="text-[11px] text-slate-500">
+                                        An administrator must add categories
+                                        before documents can be registered.
+                                    </p>
+                                </div>
+                            ) : (
+                                <ul
+                                    role="listbox"
+                                    className="space-y-1.5"
+                                >
+                                    {categories.map((cat) => {
+                                        const tier = tierForDays(cat.min_days);
+                                        const Icon = tier.icon;
+                                        const isSelected =
+                                            String(cat.id) === String(value);
+
+                                        return (
+                                            <li key={cat.id}>
+                                                <button
+                                                    type="button"
+                                                    role="option"
+                                                    aria-selected={isSelected}
+                                                    onClick={() =>
+                                                        choose(cat.id)
+                                                    }
+                                                    className={`group flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                                                        isSelected
+                                                            ? `border-transparent ${tier.softBg} ring-2 ${tier.selectedRing}`
+                                                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10'
+                                                    }`}
+                                                >
+                                                    {/* Icon */}
+                                                    <span
+                                                        className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg ${
+                                                            tier.chip
+                                                        }`}
+                                                    >
+                                                        <Icon
+                                                            className="h-5 w-5"
+                                                            strokeWidth={2}
+                                                        />
+                                                    </span>
+
+                                                    {/* Name + description */}
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                                            <span className="text-sm font-semibold text-slate-800">
+                                                                {cat.name}
+                                                            </span>
+                                                            <span
+                                                                className={`inline-flex flex-shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${
+                                                                    tier.chip
+                                                                }`}
+                                                            >
+                                                                {formatRange(
+                                                                    cat.min_days,
+                                                                    cat.max_days
+                                                                )}
+                                                            </span>
+                                                        </span>
+                                                        {cat.description ? (
+                                                            <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">
+                                                                {
+                                                                    cat.description
+                                                                }
+                                                            </span>
+                                                        ) : (
+                                                            <span className="mt-0.5 block text-[11px] text-slate-500">
+                                                                {formatRange(
+                                                                    cat.min_days,
+                                                                    cat.max_days
+                                                                )}{' '}
+                                                                per office
+                                                            </span>
+                                                        )}
+                                                    </span>
+
+                                                    {/* Selected check */}
+                                                    {isSelected ? (
+                                                        <span
+                                                            className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${
+                                                                tier.accent
+                                                            } text-white`}
+                                                        >
+                                                            <Check
+                                                                className="h-3.5 w-3.5"
+                                                                strokeWidth={
+                                                                    3
+                                                                }
+                                                            />
+                                                        </span>
+                                                    ) : (
+                                                        <span
+                                                            className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-slate-200 transition group-hover:border-slate-300`}
+                                                            aria-hidden
+                                                        />
+                                                    )}
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </div>
+
+                        {/* Footer note */}
+                        <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+                            <p className="text-[11px] leading-snug text-slate-500">
+                                <strong className="font-semibold text-slate-700">
+                                    How the window works:
+                                </strong>{' '}
+                                every office in the route gets the full window
+                                counted from the moment they receive the
+                                document — not from the date it was registered.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Office picker — searchable modal / bottom-sheet                    */
 /* ------------------------------------------------------------------ */
@@ -777,7 +1011,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
     const [query, setQuery] = useState('');
     const inputRef = useRef(null);
 
-    // Reset query and autofocus the search when opening
     useEffect(() => {
         if (!open) {
             setQuery('');
@@ -787,7 +1020,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
         return () => clearTimeout(t);
     }, [open]);
 
-    // Esc closes
     useEffect(() => {
         if (!open) return;
         const onKey = (e) => e.key === 'Escape' && setOpen(false);
@@ -795,7 +1027,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
         return () => window.removeEventListener('keydown', onKey);
     }, [open]);
 
-    // Lock body scroll while open (matters on mobile)
     useEffect(() => {
         if (!open) return;
         const prev = document.body.style.overflow;
@@ -825,7 +1056,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
         setOpen(false);
     }
 
-    // Enter picks the first available match
     function onSearchKeyDown(e) {
         if (e.key !== 'Enter') return;
         e.preventDefault();
@@ -837,7 +1067,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
 
     return (
         <>
-            {/* Trigger */}
             <button
                 type="button"
                 onClick={() => setOpen(true)}
@@ -860,7 +1089,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
                 <ChevronDown className="h-4 w-4 flex-shrink-0 text-slate-400 transition group-hover:text-slate-600" />
             </button>
 
-            {/* Picker overlay */}
             {open && (
                 <div
                     className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
@@ -868,20 +1096,16 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
                     aria-modal="true"
                     aria-label="Add destination office"
                 >
-                    {/* Backdrop */}
                     <div
                         className="animate-fade-in absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
                         onClick={() => setOpen(false)}
                     />
 
-                    {/* Panel */}
                     <div className="office-picker-panel relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/5 sm:max-h-[80vh] sm:rounded-2xl">
-                        {/* Mobile drag handle */}
                         <div className="flex justify-center pt-2.5 sm:hidden">
                             <div className="h-1 w-10 rounded-full bg-slate-300" />
                         </div>
 
-                        {/* Header */}
                         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-3">
                             <div className="min-w-0">
                                 <h3 className="text-sm font-semibold text-slate-800">
@@ -901,7 +1125,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
                             </button>
                         </div>
 
-                        {/* Search */}
                         <div className="border-b border-slate-100 px-3 py-2.5">
                             <div className="relative">
                                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -932,7 +1155,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
                             </div>
                         </div>
 
-                        {/* List */}
                         <div className="min-h-0 flex-1 overflow-y-auto p-2">
                             {filtered.length === 0 ? (
                                 <div className="flex flex-col items-center gap-2 py-10 text-center">
@@ -1012,7 +1234,6 @@ function OfficePicker({ offices = [], addedIds = [], onSelect }) {
                             )}
                         </div>
 
-                        {/* Footer hint */}
                         <div className="border-t border-slate-100 px-4 py-2.5 text-center">
                             <p className="text-[10px] text-slate-400">
                                 Tap an office to add it to the route.

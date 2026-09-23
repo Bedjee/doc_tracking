@@ -441,39 +441,72 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
     const isCompleted = doc.status === 'COMPLETED';
     const isFinished = isCompleted || isCancelled;
 
-    // Unified steps: origin + destinations
+    // =============================================================
+    //  Build the visible step list.
+    //
+    //  Same rules as the Admin monitor:
+    //
+    //  1. The backend already inserts a row for the ORIGIN office
+    //     as routes[0] (status DONE, forwarded_at = creation time).
+    //     We do NOT prepend a synthetic origin step — that would
+    //     render the origin twice.
+    //
+    //  2. Collapse any run of consecutive steps pointing at the
+    //     same office. This never touches legitimate back-to-back
+    //     different offices and preserves a return-to-sender leg
+    //     at the end because it is separated by a different office.
+    //
+    //  routes[0] is tagged `is_origin: true` so ProgressTrack can
+    //  render the origin icon/badge.
+    // =============================================================
     const steps = useMemo(() => {
-        const originStep = {
-            id: '__origin__',
-            office: origin,
-            sequence: 0,
-            is_origin: true,
-            received_at: doc.created_at,
-            forwarded_at:
-                routes.length > 0 && routes[0].received_at
-                    ? doc.created_at
-                    : null,
-        };
-        return [originStep, ...routes];
-    }, [origin, routes, doc.created_at]);
+        if (routes.length === 0) return [];
 
+        const out = [];
+        for (const r of routes) {
+            const lastOfficeId = out[out.length - 1]?.office?.id;
+            if (lastOfficeId != null && lastOfficeId === r.office?.id) {
+                continue;
+            }
+            out.push(r);
+        }
+
+        return out.map((r, idx) => ({ ...r, is_origin: idx === 0 }));
+    }, [routes]);
+
+    // =============================================================
+    //  Locate the current step.
+    //
+    //  1. IN HAND    — a step has received_at but no forwarded_at
+    //                  → that step is the current location.
+    //  2. IN TRANSIT — the doc was forwarded and is on its way to
+    //                  the next office. The step marked
+    //                  status=CURRENT is the destination it's
+    //                  heading to.
+    //  3. Fallback   — back at origin.
+    // =============================================================
     const currentIdx = useMemo(() => {
         if (isFinished) return -1;
-        if (routes.length === 0) return 0;
+        if (steps.length === 0) return 0;
 
-        const activeIdx = routes.findIndex(
+        const heldIdx = steps.findIndex(
             (r) => r.received_at && !r.forwarded_at
         );
-        if (activeIdx >= 0) return activeIdx + 1;
+        if (heldIdx >= 0) return heldIdx;
+
+        const nextIdx = steps.findIndex((r) => r.status === 'CURRENT');
+        if (nextIdx >= 0) return nextIdx;
 
         return 0;
-    }, [routes, isFinished]);
+    }, [steps, isFinished]);
 
-    const currentStep = currentIdx > 0 ? steps[currentIdx] : null;
+    const currentStep = steps[currentIdx] ?? null;
     const isOverdue = !isFinished && currentStep?.is_overdue;
+    const isReturn = !isFinished && currentStep?.is_return;
 
-    const doneCount = routes.filter((r) => r.forwarded_at).length;
-    const total = routes.length;
+    // Counts based on the visible steps so "X/Y steps" matches markers.
+    const total = steps.length;
+    const doneCount = steps.filter((r) => r.forwarded_at).length;
 
     return (
         <article
@@ -507,7 +540,6 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
                         {doc.title}
                     </h3>
 
-                    {/* Origin — prominent */}
                     <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
                         <Building2
                             className="h-3.5 w-3.5 flex-shrink-0 text-slate-500"
@@ -595,9 +627,7 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
                                 <AlertTriangle className="h-3 w-3" />
                                 Overdue{' '}
                                 {formatDuration(
-                                    Math.abs(
-                                        currentStep.remaining_seconds
-                                    )
+                                    Math.abs(currentStep.remaining_seconds)
                                 )}
                             </span>
                         ) : (
@@ -605,9 +635,7 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
                                 <Clock className="h-3.5 w-3.5 text-slate-400" />
                                 Due in{' '}
                                 {formatDuration(
-                                    Math.abs(
-                                        currentStep.remaining_seconds
-                                    )
+                                    Math.abs(currentStep.remaining_seconds)
                                 )}
                             </span>
                         )
@@ -618,7 +646,6 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
                         </span>
                     )}
 
-                    {/* ---- View link: uses the shared documents.show route ---- */}
                     <Link
                         href={route('documents.show', doc.id)}
                         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-white hover:text-slate-900"
@@ -636,7 +663,13 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
 /*  Progress track — with origin/endpoint emphasis                     */
 /* ================================================================== */
 
-function ProgressTrack({ steps, currentIdx, isCompleted, isCancelled, myOfficeId }) {
+function ProgressTrack({
+    steps,
+    currentIdx,
+    isCompleted,
+    isCancelled,
+    myOfficeId,
+}) {
     const total = steps.length;
     const lastIdx = total - 1;
     const isFinished = isCompleted || isCancelled;
@@ -711,7 +744,8 @@ function ProgressTrack({ steps, currentIdx, isCompleted, isCancelled, myOfficeId
                     const stepReturn = isCurrent && step.is_return;
 
                     const isMyOffice =
-                        step.office?.id &&
+                        myOfficeId != null &&
+                        step.office?.id != null &&
                         String(step.office.id) === String(myOfficeId);
 
                     let markerClass = 'bg-slate-300';
@@ -732,10 +766,10 @@ function ProgressTrack({ steps, currentIdx, isCompleted, isCancelled, myOfficeId
 
                     return (
                         <div
-                            key={step.id}
+                            key={step.id ?? `${step.sequence}-${i}`}
                             className="relative flex min-w-0 flex-1 flex-col items-center"
                         >
-                            {/* Badge above marker */}
+                            {/* Icon badge above marker */}
                             <div className="pointer-events-none absolute -top-9 left-1/2 flex h-8 w-8 -translate-x-1/2 items-end justify-center">
                                 {isCurrent ? (
                                     <div
