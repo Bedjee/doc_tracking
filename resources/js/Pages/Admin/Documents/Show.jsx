@@ -434,9 +434,6 @@ function DocumentInfoCard({ document }) {
                 <Row label="Tracking Number" mono>
                     {document.tracking_number}
                 </Row>
-                <Row label="Document Type">
-                    {document.type?.name ?? '—'}
-                </Row>
                 <Row label="Transaction Category">
                     {document.transaction_category?.name ?? '—'}
                     {document.processing_days_per_office && (
@@ -448,9 +445,6 @@ function DocumentInfoCard({ document }) {
                             per office
                         </span>
                     )}
-                </Row>
-                <Row label="Reference Number">
-                    {document.reference_number ?? '—'}
                 </Row>
                 <Row label="Document Date">
                     {document.document_date
