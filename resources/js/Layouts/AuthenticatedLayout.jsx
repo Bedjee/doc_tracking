@@ -1,5 +1,7 @@
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
+import Modal from '@/Components/UI/Modal';
+import Button from '@/Components/UI/Button';
 import { Link, usePage, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import {
@@ -59,6 +61,8 @@ export default function AuthenticatedLayout({ header, children }) {
 
     const [mobileOpen, setMobileOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
+    const [logoutOpen, setLogoutOpen] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
 
     useEffect(() => {
         const stored = localStorage.getItem('sidebar-collapsed');
@@ -90,6 +94,27 @@ export default function AuthenticatedLayout({ header, children }) {
         };
     }, [mobileOpen]);
 
+    /* -------- logout -------- */
+    function requestLogout() {
+        // Close the mobile drawer first so the modal appears on top cleanly.
+        setMobileOpen(false);
+        setLogoutOpen(true);
+    }
+
+    function confirmLogout() {
+        setLoggingOut(true);
+        router.post(
+            route('logout'),
+            {},
+            {
+                onFinish: () => {
+                    setLoggingOut(false);
+                    setLogoutOpen(false);
+                },
+            }
+        );
+    }
+
     const nav = [
         {
             label: 'Dashboard',
@@ -117,40 +142,38 @@ export default function AuthenticatedLayout({ header, children }) {
                   },
               ]
             : []),
-
-            ...(isHead
-    ? [
-          {
-              label: 'Monitor',
-              icon: Eye,
-              href: route('head.monitor.index'),
-              active: isAny(['head.monitor.*']),
-          },
-      ]
-    : []),
-       
-...(isAdmin
-    ? [
-          {
-              label: 'Live Monitor',
-              icon: Eye,
-              href: route('admin.monitor.index'),
-              active: isAny(['admin.monitor.*']),
-          },
-          {
-              label: 'Offices',
-              icon: Building2,
-              href: route('offices.index'),
-              active: isAny(['offices.*']),
-          },
-          {
-              label: 'Users',
-              icon: UsersIcon,
-              href: route('users.index'),
-              active: isAny(['users.*']),
-          },
-      ]
-    : []),
+        ...(isHead
+            ? [
+                  {
+                      label: 'Monitor',
+                      icon: Eye,
+                      href: route('head.monitor.index'),
+                      active: isAny(['head.monitor.*']),
+                  },
+              ]
+            : []),
+        ...(isAdmin
+            ? [
+                  {
+                      label: 'Live Monitor',
+                      icon: Eye,
+                      href: route('admin.monitor.index'),
+                      active: isAny(['admin.monitor.*']),
+                  },
+                  {
+                      label: 'Offices',
+                      icon: Building2,
+                      href: route('offices.index'),
+                      active: isAny(['offices.*']),
+                  },
+                  {
+                      label: 'Users',
+                      icon: UsersIcon,
+                      href: route('users.index'),
+                      active: isAny(['users.*']),
+                  },
+              ]
+            : []),
     ];
 
     return (
@@ -175,6 +198,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     nav={nav}
                     collapsed={false}
                     onClose={() => setMobileOpen(false)}
+                    onLogoutClick={requestLogout}
                     showClose
                 />
             </aside>
@@ -191,6 +215,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     nav={nav}
                     collapsed={collapsed}
                     onToggleCollapsed={toggleCollapsed}
+                    onLogoutClick={requestLogout}
                 />
             </aside>
 
@@ -215,7 +240,10 @@ export default function AuthenticatedLayout({ header, children }) {
                         </Link>
                     </div>
 
-                    <TopBarUserMenu user={user} />
+                    <TopBarUserMenu
+                        user={user}
+                        onLogoutClick={requestLogout}
+                    />
                 </header>
 
                 {header && (
@@ -234,6 +262,63 @@ export default function AuthenticatedLayout({ header, children }) {
 
                 <main className="flex-1">{children}</main>
             </div>
+
+            {/* ============ LOGOUT CONFIRMATION MODAL ============ */}
+            <Modal
+                show={logoutOpen}
+                onClose={() => !loggingOut && setLogoutOpen(false)}
+                maxWidth="max-w-sm"
+            >
+                <div className="px-1 pb-1 pt-1 text-center sm:px-2 sm:pt-2">
+                    {/* Icon */}
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600 ring-8 ring-red-50/50">
+                        <LogOut className="h-5 w-5" strokeWidth={2} />
+                    </div>
+
+                    {/* Title + body */}
+                    <h2 className="mt-3 text-base font-semibold text-slate-900">
+                        Log out?
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                        You'll need to sign in again to access your account.
+                        {user?.name && (
+                            <>
+                                {' '}
+                                Signed in as{' '}
+                                <span className="font-medium text-slate-700">
+                                    {user.name}
+                                </span>
+                                .
+                            </>
+                        )}
+                    </p>
+
+                    {/* Actions */}
+                    <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row">
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="lg"
+                            className="flex-1"
+                            onClick={() => setLogoutOpen(false)}
+                            disabled={loggingOut}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="danger"
+                            size="lg"
+                            className="flex-1"
+                            onClick={confirmLogout}
+                            loading={loggingOut}
+                        >
+                            <LogOut className="h-4 w-4" />
+                            Log out
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
@@ -248,6 +333,7 @@ function SidebarContent({
     collapsed = false,
     onToggleCollapsed,
     onClose,
+    onLogoutClick,
     showClose = false,
 }) {
     return (
@@ -304,13 +390,12 @@ function SidebarContent({
             <div className="flex-shrink-0 space-y-1 border-t border-white/10 p-2">
                 <SidebarUserCard user={user} collapsed={collapsed} />
 
-                {/* Always-visible logout */}
-                <Link
-                    href={route('logout')}
-                    method="post"
-                    as="button"
+                {/* Logout — now opens the confirmation modal */}
+                <button
+                    type="button"
+                    onClick={onLogoutClick}
                     title={collapsed ? 'Log Out' : undefined}
-                    className={`group flex w-full items-center rounded-lg text-sm font-medium text-slate-300 transition hover:bg-red-500/15 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400/40 ${
+                    className={`group relative flex w-full items-center rounded-lg text-sm font-medium text-slate-300 transition hover:bg-red-500/15 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-400/40 ${
                         collapsed
                             ? 'justify-center p-2.5'
                             : 'gap-3 px-3 py-2.5'
@@ -327,7 +412,7 @@ function SidebarContent({
                             Log Out
                         </span>
                     )}
-                </Link>
+                </button>
 
                 {/* Collapse toggle */}
                 {onToggleCollapsed && (
@@ -441,7 +526,7 @@ function SidebarLink({ label, icon: Icon, href, active, collapsed }) {
 /*  Top bar user menu (mobile only — stays a dropdown)                 */
 /* ------------------------------------------------------------------ */
 
-function TopBarUserMenu({ user }) {
+function TopBarUserMenu({ user, onLogoutClick }) {
     const initials = getInitials(user.name);
 
     return (
@@ -469,16 +554,17 @@ function TopBarUserMenu({ user }) {
                     </p>
                 </div>
                 <div className="border-t border-slate-100" />
-                <Dropdown.Link
-                    href={route('logout')}
-                    method="post"
-                    as="button"
+
+                {/* Custom button (not Dropdown.Link) so we can intercept
+                    the click and open the confirmation modal. */}
+                <button
+                    type="button"
+                    onClick={onLogoutClick}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-start text-sm text-slate-700 transition hover:bg-slate-100 focus:outline-none"
                 >
-                    <span className="inline-flex items-center gap-2">
-                        <LogOut className="h-4 w-4" />
-                        Log Out
-                    </span>
-                </Dropdown.Link>
+                    <LogOut className="h-4 w-4" />
+                    Log Out
+                </button>
             </Dropdown.Content>
         </Dropdown>
     );

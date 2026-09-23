@@ -88,7 +88,9 @@ export default function Show({
     const otherOffices = useMemo(
         () =>
             offices.filter(
-                (o) => !previousOffice || Number(o.id) !== Number(previousOffice.id)
+                (o) =>
+                    !previousOffice ||
+                    Number(o.id) !== Number(previousOffice.id)
             ),
         [offices, previousOffice]
     );
@@ -116,7 +118,8 @@ export default function Show({
                 setReason('');
                 setReturnOtherOfficeId('');
             },
-            onError: (e) => toast.error(Object.values(e)[0] ?? 'Action failed.'),
+            onError: (e) =>
+                toast.error(Object.values(e)[0] ?? 'Action failed.'),
             onFinish: () => setBusy(false),
         });
     }
@@ -381,149 +384,148 @@ export default function Show({
                 />
             </Modal>
 
-            {/* ---------- Return modal (redesigned) ---------- */}
-         {/* ---------- Return modal ---------- */}
-<Modal
-    show={modal === 'return'}
-    onClose={() => setModal(null)}
-    title="Return document"
-    maxWidth="max-w-md"
-    footer={
-        <>
-            <Button variant="secondary" onClick={() => setModal(null)}>
-                Cancel
-            </Button>
-            <Button
-                variant="warning"
-                loading={busy}
-                disabled={!returnValid}
-                onClick={submitReturn}
+            {/* ---------- Return modal ---------- */}
+            <Modal
+                show={modal === 'return'}
+                onClose={() => setModal(null)}
+                title="Return document"
+                maxWidth="max-w-md"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setModal(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="warning"
+                            loading={busy}
+                            disabled={!returnValid}
+                            onClick={submitReturn}
+                        >
+                            Return
+                        </Button>
+                    </>
+                }
             >
-                Return
-            </Button>
-        </>
-    }
->
-    <div className="space-y-4">
-        {/* Document summary — single line */}
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <FileText className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
-            <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold text-slate-800">
-                    {document.title}
-                </p>
-                <p className="truncate font-mono text-[10px] text-slate-500">
-                    {document.tracking_number}
-                </p>
-            </div>
-        </div>
+                <div className="space-y-4">
+                    {/* Document summary — single line */}
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <FileText className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                        <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-semibold text-slate-800">
+                                {document.title}
+                            </p>
+                            <p className="truncate font-mono text-[10px] text-slate-500">
+                                {document.tracking_number}
+                            </p>
+                        </div>
+                    </div>
 
-        {/* Return destination */}
-        <div>
-            <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                    Return to
-                </span>
-                <span className="text-[10px] text-red-500">*</span>
-            </div>
+                    {/* Return destination */}
+                    <div>
+                        <div className="mb-1.5 flex items-center justify-between">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                Return to
+                            </span>
+                            <span className="text-[10px] text-red-500">*</span>
+                        </div>
 
-            <div className="space-y-1.5">
-                {previousOffice && (
-                    <ReturnTargetCard
-                        selected={returnTarget === 'previous'}
-                        onSelect={() => setReturnTarget('previous')}
-                        eyebrow="Suggested"
-                        title={previousOffice.name}
-                        subtitle="Office that sent this document"
-                        tone="blue"
-                    />
-                )}
+                        <div className="space-y-1.5">
+                            {previousOffice && (
+                                <ReturnTargetCard
+                                    selected={returnTarget === 'previous'}
+                                    onSelect={() => setReturnTarget('previous')}
+                                    eyebrow="Suggested"
+                                    title={previousOffice.name}
+                                    subtitle="Office that sent this document"
+                                    tone="blue"
+                                />
+                            )}
 
-                <ReturnTargetCard
-                    selected={returnTarget === 'other'}
-                    onSelect={() => setReturnTarget('other')}
-                    title="Other office"
-                    subtitle="Choose from available offices"
-                    tone="slate"
-                />
-            </div>
+                            <ReturnTargetCard
+                                selected={returnTarget === 'other'}
+                                onSelect={() => setReturnTarget('other')}
+                                title="Other office"
+                                subtitle="Choose from available offices"
+                                tone="slate"
+                            />
+                        </div>
 
-            {returnTarget === 'other' && (
-                <div className="mt-2">
-                    <InlineOfficePicker
-                        offices={otherOffices}
-                        value={returnOtherOfficeId}
-                        onChange={setReturnOtherOfficeId}
-                    />
+                        {returnTarget === 'other' && (
+                            <div className="mt-2">
+                                <InlineOfficePicker
+                                    offices={otherOffices}
+                                    value={returnOtherOfficeId}
+                                    onChange={setReturnOtherOfficeId}
+                                />
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Reason */}
+                    <div>
+                        <label
+                            htmlFor="return-reason"
+                            className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+                        >
+                            <span>
+                                Reason <span className="text-red-500">*</span>
+                            </span>
+                            <span className="font-normal normal-case tracking-normal text-slate-400">
+                                Added to audit trail
+                            </span>
+                        </label>
+                        <textarea
+                            id="return-reason"
+                            rows={2}
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            placeholder="e.g. Incomplete requirements, wrong recipient"
+                            className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                    </div>
+
+                    {/* Optional remarks */}
+                    <div>
+                        <label
+                            htmlFor="return-remarks"
+                            className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+                        >
+                            <span>Remarks</span>
+                            <span className="font-normal normal-case tracking-normal text-slate-400">
+                                Optional
+                            </span>
+                        </label>
+                        <textarea
+                            id="return-remarks"
+                            rows={2}
+                            value={remarks}
+                            onChange={(e) => setRemarks(e.target.value)}
+                            placeholder="Anything else the office should know"
+                            className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                    </div>
+
+                    {/* Compact summary strip */}
+                    {effectiveReturnOfficeId && (
+                        <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-800">
+                            <Info className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                            <p>
+                                Routes to{' '}
+                                <strong className="font-semibold">
+                                    {returnTarget === 'previous'
+                                        ? previousOffice?.name
+                                        : offices.find(
+                                              (o) =>
+                                                  Number(o.id) ===
+                                                  Number(returnOtherOfficeId)
+                                          )?.name ?? 'the selected office'}
+                                </strong>
+                                . Past history is preserved.
+                            </p>
+                        </div>
+                    )}
                 </div>
-            )}
-        </div>
-
-        {/* Reason */}
-        <div>
-            <label
-                htmlFor="return-reason"
-                className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
-            >
-                <span>
-                    Reason <span className="text-red-500">*</span>
-                </span>
-                <span className="font-normal normal-case tracking-normal text-slate-400">
-                    Added to audit trail
-                </span>
-            </label>
-            <textarea
-                id="return-reason"
-                rows={2}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g. Incomplete requirements, wrong recipient"
-                className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-        </div>
-
-        {/* Optional remarks */}
-        <div>
-            <label
-                htmlFor="return-remarks"
-                className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500"
-            >
-                <span>Remarks</span>
-                <span className="font-normal normal-case tracking-normal text-slate-400">
-                    Optional
-                </span>
-            </label>
-            <textarea
-                id="return-remarks"
-                rows={2}
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Anything else the office should know"
-                className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-        </div>
-
-        {/* Compact summary strip */}
-        {effectiveReturnOfficeId && (
-            <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-800">
-                <Info className="mt-0.5 h-3 w-3 flex-shrink-0" />
-                <p>
-                    Routes to{' '}
-                    <strong className="font-semibold">
-                        {returnTarget === 'previous'
-                            ? previousOffice?.name
-                            : offices.find(
-                                  (o) =>
-                                      Number(o.id) ===
-                                      Number(returnOtherOfficeId)
-                              )?.name ?? 'the selected office'}
-                    </strong>
-                    . Past history is preserved.
-                </p>
-            </div>
-        )}
-    </div>
-</Modal>
+            </Modal>
 
             {/* ---------- Cancel modal ---------- */}
             <Modal
@@ -592,6 +594,7 @@ export default function Show({
 /* ================================================================== */
 /*  RETURN — target option card                                        */
 /* ================================================================== */
+
 function ReturnTargetCard({
     selected,
     onSelect,
@@ -627,7 +630,6 @@ function ReturnTargetCard({
                     : 'border-slate-200 bg-white active:bg-slate-50'
             }`}
         >
-            {/* Radio indicator */}
             <span
                 className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2 transition ${
                     selected ? t.dot : 'border-slate-300 bg-white'
@@ -636,7 +638,6 @@ function ReturnTargetCard({
                 {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
             </span>
 
-            {/* Content */}
             <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                     {eyebrow && (
@@ -663,8 +664,6 @@ function ReturnTargetCard({
         </button>
     );
 }
-
-
 
 /* ================================================================== */
 /*  RETURN — inline searchable office picker                           */
@@ -695,7 +694,6 @@ function InlineOfficePicker({ offices = [], value, onChange }) {
 
     return (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            {/* Search */}
             <div className="border-b border-slate-100 p-1.5">
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -706,20 +704,9 @@ function InlineOfficePicker({ offices = [], value, onChange }) {
                         placeholder="Search offices…"
                         className="w-full rounded-md border-0 bg-slate-50 py-1.5 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900/20"
                     />
-                    {query && (
-                        <button
-                            type="button"
-                            onClick={() => setQuery('')}
-                            className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
-                            aria-label="Clear"
-                        >
-                            <X className="h-2.5 w-2.5" />
-                        </button>
-                    )}
                 </div>
             </div>
 
-            {/* List */}
             <div className="max-h-44 overflow-y-auto p-1">
                 {filtered.length === 0 ? (
                     <p className="px-3 py-4 text-center text-[11px] text-slate-400">
@@ -779,19 +766,6 @@ function InlineOfficePicker({ offices = [], value, onChange }) {
 /*  Section components                                                 */
 /* ================================================================== */
 
-function DocumentMini({ doc }) {
-    return (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="truncate text-sm font-semibold text-slate-800">
-                {doc.title}
-            </p>
-            <p className="mt-0.5 font-mono text-xs text-slate-500">
-                {doc.tracking_number}
-            </p>
-        </div>
-    );
-}
-
 function DocumentInfoCard({ document }) {
     return (
         <Card title="Document Information" icon={FileText}>
@@ -799,7 +773,6 @@ function DocumentInfoCard({ document }) {
                 <Row label="Tracking Number" mono>
                     {document.tracking_number}
                 </Row>
-                <Row label="Document Type">{document.type?.name ?? '—'}</Row>
                 <Row label="Transaction Category">
                     {document.transaction_category?.name ?? '—'}
                     {document.processing_days_per_office && (
@@ -827,9 +800,6 @@ function DocumentInfoCard({ document }) {
                             At final destination office
                         </span>
                     )}
-                </Row>
-                <Row label="Reference Number">
-                    {document.reference_number ?? '—'}
                 </Row>
                 <Row label="Document Date">
                     {document.document_date
