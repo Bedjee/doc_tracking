@@ -56,34 +56,52 @@ class DocumentRoutingService
             ]);
         }
 
-        $receivedAt = now();
+      $receivedAt = now();
 
-        $dueAt = $step->processing_days
-            ? $receivedAt->copy()->addDays($step->processing_days)
-            : null;
+$dueAt = $step->processing_days
+    ? $receivedAt->copy()->addDays($step->processing_days)
+    : null;
 
-        // Is this the last step in the route? If so, receiving it means the
-        // document is finished — no further actions, no further timer.
-        $isFinal = (int) $document->routes()->max('sequence') === (int) $step->sequence;
+// Is this the last step in the route? If so, receiving it means the
+// document is finished — no further actions, no further timer.
+$isFinal = (int) $document->routes()->max('sequence') === (int) $step->sequence;
 
-        $step->update([
-            // On a final step, close it immediately with status DONE and set
-            // forwarded_at = received_at so LiveElapsed freezes at that instant.
-            'status'       => $isFinal
-                ? DocumentRoute::STATUS_DONE
-                : DocumentRoute::STATUS_RECEIVED,
-            'received_at'  => $receivedAt,
-            'due_at'       => $dueAt,
-            'forwarded_at' => $isFinal ? $receivedAt : null,
-        ]);
+$step->update([
+    'status'       => $isFinal
+        ? DocumentRoute::STATUS_DONE
+        : DocumentRoute::STATUS_RECEIVED,
+    'received_at'  => $receivedAt,
+    'due_at'       => $dueAt,
+    'forwarded_at' => $isFinal ? $receivedAt : null,
+]);
 
-        $document->update([
-            'current_office_id' => $user->office_id,
-            'status'            => $isFinal
-                ? Document::STATUS_COMPLETED
-                : Document::STATUS_RECEIVED,
-            'completed_at'      => $isFinal ? $receivedAt : null,
-        ]);
+/*
+ * The document is now held by this office. `current_office_id` becomes
+ * the receiving office. `current_destination_office_id` points at the
+ * NEXT office in the route (the next PENDING step), so the UI shows
+ * "Currently at X → Next Y" with distinct offices.
+ *
+ * If this was the final step, no next office exists — null.
+ */
+$nextStep = $isFinal
+    ? null
+    : $document->routes()
+        ->where('sequence', '>', $step->sequence)
+        ->where('status', DocumentRoute::STATUS_PENDING)
+        ->orderBy('sequence')
+        ->first();
+
+$document->update([
+    'current_office_id'             => $user->office_id,
+    'current_destination_office_id' => $nextStep?->office_id,
+    'status'                        => $isFinal
+        ? Document::STATUS_COMPLETED
+        : Document::STATUS_RECEIVED,
+    'completed_at'                  => $isFinal ? $receivedAt : null,
+]);
+
+
+
 
         $this->documents->logEvent($document, DocumentEvent::TYPE_RECEIVED, [
             'from_office_id' => null,

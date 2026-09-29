@@ -13,22 +13,37 @@ use Inertia\Inertia;
 class UserController extends Controller
 {
     public function index(Request $request)
-    {
-        $users = User::with('office:id,name')
-            ->when($request->search, fn ($q, $s) => $q->where(function ($q) use ($s) {
-                $q->where('name', 'like', "%{$s}%")->orWhere('username', 'like', "%{$s}%");
-            }))
-            ->when($request->office_id, fn ($q, $id) => $q->where('office_id', $id))
-            ->orderBy('name')
-            ->paginate(15)
-            ->withQueryString();
-
-        return Inertia::render('Admin/Users/Index', [
-            'users'   => $users,
-            'offices' => Office::active()->orderBy('name')->get(['id', 'name']),
-            'filters' => $request->only(['search', 'office_id']),
+{
+    $users = User::with('office:id,name')
+        ->when($request->search, fn ($q, $s) => $q->where(function ($q) use ($s) {
+            $q->where('name', 'like', "%{$s}%")
+              ->orWhere('username', 'like', "%{$s}%");
+        }))
+        ->when($request->office_id, fn ($q, $id) => $q->where('office_id', $id))
+        ->orderBy('name')
+        ->paginate(15)
+        ->withQueryString()
+        ->through(fn (User $u) => [
+            'id'        => $u->id,
+            'name'      => $u->name,
+            'username'  => $u->username,
+            'email'     => $u->email,
+            'role'      => $u->role,
+            'is_active' => $u->is_active,
+            'office'    => $u->office
+                ? ['id' => $u->office->id, 'name' => $u->office->name]
+                : null,
+            'has_pin'   => !empty($u->pin_hash),   // ← the missing piece
         ]);
-    }
+
+    return Inertia::render('Admin/Users/Index', [
+        'users'   => $users,
+        'offices' => Office::active()->orderBy('name')->get(['id', 'name']),
+        'filters' => $request->only(['search', 'office_id']),
+    ]);
+}
+
+
 
     public function create()
     {
@@ -96,4 +111,46 @@ public function update(Request $request, User $user)
             'is_active' => ['boolean'],
         ]);
     }
+
+
+    /**
+ * Generate a new 4-digit PIN for the user and return it ONCE.
+ * The PIN is hashed in the database — this response is the only time
+ * the plain value is ever available. The admin must hand it to the
+ * user immediately.
+ */
+public function regeneratePin(Request $request, User $user)
+{
+    // Generate a PIN that isn't used by any other account.
+    $pin = User::generateUniquePin();
+    $user->setPin($pin);
+
+    if ($request->wantsJson()) {
+        return response()->json([
+            'user' => ['id' => $user->id, 'name' => $user->name],
+            'pin'  => $pin,
+        ]);
+    }
+
+    return back()->with('success', "New PIN generated for {$user->name}.");
+}
+
+
+
+/**
+ * Clear the user's PIN. They will need to log in with password until a
+ * new PIN is generated.
+ */
+public function clearPin(Request $request, User $user)
+{
+    $user->clearPin();
+
+    if ($request->wantsJson()) {
+        return response()->json(['ok' => true]);
+    }
+
+    return back()->with('success', "PIN cleared for {$user->name}.");
+}
+
+
 }

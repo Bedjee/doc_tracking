@@ -2,6 +2,8 @@ import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
 import Modal from '@/Components/UI/Modal';
 import Button from '@/Components/UI/Button';
+import ReminderBanner from '@/Components/Notifications/ReminderBanner';
+import ChangePinModal from '@/Components/Users/ChangePinModal';
 import { Link, usePage, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import {
@@ -10,6 +12,7 @@ import {
     ChevronRight,
     Eye,
     FileText,
+    KeyRound,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -62,8 +65,10 @@ export default function AuthenticatedLayout({ header, children }) {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
     const [logoutOpen, setLogoutOpen] = useState(false);
+    const [changePinOpen, setChangePinOpen] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
 
+    /* -------- restore sidebar collapse preference -------- */
     useEffect(() => {
         const stored = localStorage.getItem('sidebar-collapsed');
         if (stored === 'true') setCollapsed(true);
@@ -76,6 +81,7 @@ export default function AuthenticatedLayout({ header, children }) {
         });
     }
 
+    /* -------- close drawer on navigation -------- */
     useEffect(() => {
         const remove = router.on('navigate', () => setMobileOpen(false));
         return () => {
@@ -87,6 +93,7 @@ export default function AuthenticatedLayout({ header, children }) {
         };
     }, []);
 
+    /* -------- lock body scroll while drawer is open -------- */
     useEffect(() => {
         document.body.style.overflow = mobileOpen ? 'hidden' : '';
         return () => {
@@ -94,9 +101,25 @@ export default function AuthenticatedLayout({ header, children }) {
         };
     }, [mobileOpen]);
 
+    /* -------- refresh reminders when tab regains focus -------- */
+    useEffect(() => {
+        function refresh() {
+            if (document.visibilityState === 'visible') {
+                router.reload({ only: ['reminders'] });
+            }
+        }
+
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+
+        return () => {
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+        };
+    }, []);
+
     /* -------- logout -------- */
     function requestLogout() {
-        // Close the mobile drawer first so the modal appears on top cleanly.
         setMobileOpen(false);
         setLogoutOpen(true);
     }
@@ -115,6 +138,13 @@ export default function AuthenticatedLayout({ header, children }) {
         );
     }
 
+    /* -------- change PIN -------- */
+    function requestChangePin() {
+        setMobileOpen(false);
+        setChangePinOpen(true);
+    }
+
+    /* -------- navigation definition -------- */
     const nav = [
         {
             label: 'Dashboard',
@@ -199,6 +229,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     collapsed={false}
                     onClose={() => setMobileOpen(false)}
                     onLogoutClick={requestLogout}
+                    onChangePin={requestChangePin}
                     showClose
                 />
             </aside>
@@ -216,6 +247,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     collapsed={collapsed}
                     onToggleCollapsed={toggleCollapsed}
                     onLogoutClick={requestLogout}
+                    onChangePin={requestChangePin}
                 />
             </aside>
 
@@ -225,6 +257,7 @@ export default function AuthenticatedLayout({ header, children }) {
                     collapsed ? 'lg:pl-[72px]' : 'lg:pl-64'
                 }`}
             >
+                {/* Mobile top bar */}
                 <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/95 px-3 backdrop-blur lg:hidden">
                     <div className="flex items-center gap-2">
                         <button
@@ -243,9 +276,11 @@ export default function AuthenticatedLayout({ header, children }) {
                     <TopBarUserMenu
                         user={user}
                         onLogoutClick={requestLogout}
+                        onChangePin={requestChangePin}
                     />
                 </header>
 
+                {/* Desktop page header */}
                 {header && (
                     <header className="hidden border-b border-slate-200 bg-white lg:block">
                         <div className="mx-auto max-w-7xl px-6 py-4 lg:px-8">
@@ -254,11 +289,15 @@ export default function AuthenticatedLayout({ header, children }) {
                     </header>
                 )}
 
+                {/* Mobile page header */}
                 {header && (
                     <header className="border-b border-slate-200 bg-white lg:hidden">
                         <div className="px-4 py-3">{header}</div>
                     </header>
                 )}
+
+                {/* ============ REMINDER BANNER ============ */}
+                <ReminderBanner />
 
                 <main className="flex-1">{children}</main>
             </div>
@@ -270,12 +309,10 @@ export default function AuthenticatedLayout({ header, children }) {
                 maxWidth="max-w-sm"
             >
                 <div className="px-1 pb-1 pt-1 text-center sm:px-2 sm:pt-2">
-                    {/* Icon */}
                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600 ring-8 ring-red-50/50">
                         <LogOut className="h-5 w-5" strokeWidth={2} />
                     </div>
 
-                    {/* Title + body */}
                     <h2 className="mt-3 text-base font-semibold text-slate-900">
                         Log out?
                     </h2>
@@ -293,7 +330,6 @@ export default function AuthenticatedLayout({ header, children }) {
                         )}
                     </p>
 
-                    {/* Actions */}
                     <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row">
                         <Button
                             type="button"
@@ -319,6 +355,13 @@ export default function AuthenticatedLayout({ header, children }) {
                     </div>
                 </div>
             </Modal>
+
+            {/* ============ CHANGE PIN MODAL ============ */}
+            <ChangePinModal
+                show={changePinOpen}
+                onClose={() => setChangePinOpen(false)}
+                hasPin={!!user?.has_pin}
+            />
         </div>
     );
 }
@@ -334,8 +377,11 @@ function SidebarContent({
     onToggleCollapsed,
     onClose,
     onLogoutClick,
+    onChangePin,
     showClose = false,
 }) {
+    const hasPin = !!user?.has_pin;
+
     return (
         <>
             {/* ---- Brand header ---- */}
@@ -386,11 +432,37 @@ function SidebarContent({
                 ))}
             </nav>
 
-            {/* ---- Footer: user info + logout + collapse toggle ---- */}
+            {/* ---- Footer: user info + change PIN + logout + collapse ---- */}
             <div className="flex-shrink-0 space-y-1 border-t border-white/10 p-2">
                 <SidebarUserCard user={user} collapsed={collapsed} />
 
-                {/* Logout — now opens the confirmation modal */}
+                {/* Change PIN */}
+                <button
+                    type="button"
+                    onClick={onChangePin}
+                    title={collapsed ? (hasPin ? 'Change PIN' : 'Set PIN') : undefined}
+                    className={`group relative flex w-full items-center rounded-lg text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 ${
+                        collapsed
+                            ? 'justify-center p-2.5'
+                            : 'gap-3 px-3 py-2.5'
+                    }`}
+                >
+                    <KeyRound
+                        className="h-[18px] w-[18px] flex-shrink-0"
+                        strokeWidth={1.8}
+                    />
+                    {!collapsed && (
+                        <span>{hasPin ? 'Change PIN' : 'Set PIN'}</span>
+                    )}
+
+                    {collapsed && (
+                        <span className="pointer-events-none absolute left-full z-50 ml-2 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                            {hasPin ? 'Change PIN' : 'Set PIN'}
+                        </span>
+                    )}
+                </button>
+
+                {/* Logout */}
                 <button
                     type="button"
                     onClick={onLogoutClick}
@@ -447,7 +519,7 @@ function SidebarContent({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sidebar user card (non-interactive — just shows who's signed in)   */
+/*  Sidebar user card                                                  */
 /* ------------------------------------------------------------------ */
 
 function SidebarUserCard({ user, collapsed }) {
@@ -523,11 +595,12 @@ function SidebarLink({ label, icon: Icon, href, active, collapsed }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Top bar user menu (mobile only — stays a dropdown)                 */
+/*  Top bar user menu (mobile only)                                    */
 /* ------------------------------------------------------------------ */
 
-function TopBarUserMenu({ user, onLogoutClick }) {
+function TopBarUserMenu({ user, onLogoutClick, onChangePin }) {
     const initials = getInitials(user.name);
+    const hasPin = !!user?.has_pin;
 
     return (
         <Dropdown>
@@ -555,8 +628,15 @@ function TopBarUserMenu({ user, onLogoutClick }) {
                 </div>
                 <div className="border-t border-slate-100" />
 
-                {/* Custom button (not Dropdown.Link) so we can intercept
-                    the click and open the confirmation modal. */}
+                <button
+                    type="button"
+                    onClick={onChangePin}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-start text-sm text-slate-700 transition hover:bg-slate-100 focus:outline-none"
+                >
+                    <KeyRound className="h-4 w-4" />
+                    {hasPin ? 'Change PIN' : 'Set PIN'}
+                </button>
+
                 <button
                     type="button"
                     onClick={onLogoutClick}

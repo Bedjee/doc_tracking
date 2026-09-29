@@ -432,7 +432,6 @@ export default function HeadMonitor({
 /* ================================================================== */
 /*  Document card                                                      */
 /* ================================================================== */
-
 function DocumentProgressCard({ doc, scope, myOfficeId }) {
     const routes = doc.routes ?? [];
     const origin = doc.originating_office;
@@ -443,21 +442,7 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
 
     // =============================================================
     //  Build the visible step list.
-    //
-    //  Same rules as the Admin monitor:
-    //
-    //  1. The backend already inserts a row for the ORIGIN office
-    //     as routes[0] (status DONE, forwarded_at = creation time).
-    //     We do NOT prepend a synthetic origin step — that would
-    //     render the origin twice.
-    //
-    //  2. Collapse any run of consecutive steps pointing at the
-    //     same office. This never touches legitimate back-to-back
-    //     different offices and preserves a return-to-sender leg
-    //     at the end because it is separated by a different office.
-    //
-    //  routes[0] is tagged `is_origin: true` so ProgressTrack can
-    //  render the origin icon/badge.
+    //  (Dedupe consecutive same-office rows, tag routes[0] as origin.)
     // =============================================================
     const steps = useMemo(() => {
         if (routes.length === 0) return [];
@@ -475,36 +460,67 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
     }, [routes]);
 
     // =============================================================
-    //  Locate the current step.
+    //  Progress state.
     //
-    //  1. IN HAND    — a step has received_at but no forwarded_at
-    //                  → that step is the current location.
-    //  2. IN TRANSIT — the doc was forwarded and is on its way to
-    //                  the next office. The step marked
-    //                  status=CURRENT is the destination it's
-    //                  heading to.
-    //  3. Fallback   — back at origin.
+    //  positionIdx  — float. Where to draw the moving icon and fill
+    //                 bar. Integer i = sitting exactly on step i.
+    //                 i + 0.5 = halfway between step i and step i+1
+    //                 (in transit).
+    //
+    //  highlightIdx — integer. Which marker gets the "current" pulse,
+    //                 or -1 when the document is between offices.
+    //
+    //  currentStep  — only used for timing info in the footer.
     // =============================================================
-    const currentIdx = useMemo(() => {
-        if (isFinished) return -1;
-        if (steps.length === 0) return 0;
+    const progress = useMemo(() => {
+        if (steps.length === 0) {
+            return { positionIdx: 0, highlightIdx: -1, currentStep: null };
+        }
 
+        if (isFinished) {
+            return {
+                positionIdx: steps.length - 1,
+                highlightIdx: -1,
+                currentStep: null,
+            };
+        }
+
+        // 1. Held by an office (received, not yet forwarded)
         const heldIdx = steps.findIndex(
             (r) => r.received_at && !r.forwarded_at
         );
-        if (heldIdx >= 0) return heldIdx;
+        if (heldIdx >= 0) {
+            return {
+                positionIdx: heldIdx,
+                highlightIdx: heldIdx,
+                currentStep: steps[heldIdx],
+            };
+        }
 
+        // 2. In transit — destination marked CURRENT but not received.
+        //    Sit halfway between the previous step and the destination.
+        //    No marker pulses, because no office holds the document.
         const nextIdx = steps.findIndex((r) => r.status === 'CURRENT');
-        if (nextIdx >= 0) return nextIdx;
+        if (nextIdx > 0) {
+            return {
+                positionIdx: nextIdx - 0.5,
+                highlightIdx: -1,
+                currentStep: steps[nextIdx],
+            };
+        }
 
-        return 0;
+        // 3. Fallback — origin.
+        return {
+            positionIdx: 0,
+            highlightIdx: 0,
+            currentStep: steps[0],
+        };
     }, [steps, isFinished]);
 
-    const currentStep = steps[currentIdx] ?? null;
-    const isOverdue = !isFinished && currentStep?.is_overdue;
-    const isReturn = !isFinished && currentStep?.is_return;
+    const { positionIdx, highlightIdx, currentStep } = progress;
 
-    // Counts based on the visible steps so "X/Y steps" matches markers.
+    const isOverdue = !isFinished && currentStep?.is_overdue;
+
     const total = steps.length;
     const doneCount = steps.filter((r) => r.forwarded_at).length;
 
@@ -563,7 +579,8 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
             {steps.length > 0 ? (
                 <ProgressTrack
                     steps={steps}
-                    currentIdx={currentIdx}
+                    positionIdx={positionIdx}
+                    highlightIdx={highlightIdx}
                     isCompleted={isCompleted}
                     isCancelled={isCancelled}
                     myOfficeId={myOfficeId}
@@ -659,13 +676,17 @@ function DocumentProgressCard({ doc, scope, myOfficeId }) {
     );
 }
 
+
+
+
+
 /* ================================================================== */
 /*  Progress track — with origin/endpoint emphasis                     */
 /* ================================================================== */
-
 function ProgressTrack({
     steps,
-    currentIdx,
+    positionIdx,
+    highlightIdx,
     isCompleted,
     isCancelled,
     myOfficeId,
@@ -673,20 +694,12 @@ function ProgressTrack({
     const total = steps.length;
     const lastIdx = total - 1;
     const isFinished = isCompleted || isCancelled;
-    const hasCurrent = currentIdx >= 0;
 
-    const iconPos = isFinished
-        ? 100
-        : hasCurrent && total > 1
-          ? (currentIdx / (total - 1)) * 100
-          : 0;
+    const highlightStep = highlightIdx >= 0 ? steps[highlightIdx] : null;
+    const isOverdue = !isFinished && highlightStep?.is_overdue;
+    const isReturn = !isFinished && highlightStep?.is_return;
 
-    const fillPct = isFinished ? 100 : iconPos;
-
-    const currentStep = hasCurrent ? steps[currentIdx] : null;
-    const isOverdue = !isFinished && currentStep?.is_overdue;
-    const isReturn = !isFinished && currentStep?.is_return;
-
+    /* ---- moving icon colors ---- */
     const iconBg = isCancelled
         ? 'bg-slate-500 shadow-slate-500/40'
         : isCompleted
@@ -695,9 +708,7 @@ function ProgressTrack({
             ? 'bg-red-500 shadow-red-500/40'
             : isReturn
               ? 'bg-amber-500 shadow-amber-500/40'
-              : hasCurrent
-                ? 'bg-blue-500 shadow-blue-500/40'
-                : 'bg-slate-400 shadow-slate-400/40';
+              : 'bg-blue-500 shadow-blue-500/40';
 
     const tailBg = isCancelled
         ? 'bg-slate-500'
@@ -707,9 +718,7 @@ function ProgressTrack({
             ? 'bg-red-500'
             : isReturn
               ? 'bg-amber-500'
-              : hasCurrent
-                ? 'bg-blue-500'
-                : 'bg-slate-400';
+              : 'bg-blue-500';
 
     const fillGradient = isCancelled
         ? 'bg-gradient-to-r from-emerald-500 to-slate-400'
@@ -719,9 +728,33 @@ function ProgressTrack({
             ? 'bg-gradient-to-r from-emerald-500 via-emerald-500 to-red-500'
             : 'bg-gradient-to-r from-emerald-500 to-blue-500';
 
+    /* ---- positions ---- */
+
+    // Icon left as a % of the container.
+    //   positionIdx = i       → step i's marker centre
+    //   positionIdx = i + 0.5 → midpoint between step i and i+1
+    const iconLeftPct = total > 0 ? (50 + positionIdx * 100) / total : 50;
+
+    // Fill bar width as a % of the track.
+    const fillPct = isFinished
+        ? 100
+        : total > 1
+          ? Math.max(
+                0,
+                Math.min(100, (positionIdx / (total - 1)) * 100)
+            )
+          : 0;
+
+    // Is the icon currently sitting exactly on a step?
+    const isIconOnStep = Number.isInteger(positionIdx);
+    const iconStepIdx = isIconOnStep ? Math.round(positionIdx) : -1;
+
+    const showMovingIcon = !isFinished && total > 0;
+
     return (
         <div className="px-4 pt-14 pb-4 sm:px-5 sm:pt-16">
             <div className="relative flex">
+                {/* -------- track + fill -------- */}
                 <div
                     className="absolute top-[6px] h-1.5 -translate-y-1/2 rounded-full bg-slate-200"
                     style={{
@@ -735,13 +768,14 @@ function ProgressTrack({
                     />
                 </div>
 
+                {/* -------- step markers -------- */}
                 {steps.map((step, i) => {
                     const isOrigin = !!step.is_origin;
                     const isEndpoint = !isOrigin && i === lastIdx;
                     const isPassed = !!step.forwarded_at;
-                    const isCurrent = !isFinished && i === currentIdx;
-                    const stepOverdue = isCurrent && step.is_overdue;
-                    const stepReturn = isCurrent && step.is_return;
+                    const isHighlighted = i === highlightIdx;
+                    const stepOverdue = isHighlighted && step.is_overdue;
+                    const stepReturn = isHighlighted && step.is_return;
 
                     const isMyOffice =
                         myOfficeId != null &&
@@ -751,7 +785,7 @@ function ProgressTrack({
                     let markerClass = 'bg-slate-300';
                     if (isPassed || isFinished) {
                         markerClass = 'bg-emerald-500';
-                    } else if (isCurrent) {
+                    } else if (isHighlighted) {
                         markerClass = stepOverdue
                             ? 'bg-red-500 animate-pulse'
                             : stepReturn
@@ -762,32 +796,28 @@ function ProgressTrack({
                     }
 
                     const showLabelMobile =
-                        isOrigin || isEndpoint || isCurrent || isMyOffice;
+                        isOrigin || isEndpoint || isHighlighted || isMyOffice;
+
+                    // Hide the static origin/endpoint icon when the moving
+                    // icon sits exactly on top of it.
+                    const hideStaticIcon = iconStepIdx === i;
 
                     return (
                         <div
                             key={step.id ?? `${step.sequence}-${i}`}
                             className="relative flex min-w-0 flex-1 flex-col items-center"
                         >
-                            {/* Icon badge above marker */}
+                            {/* Static icons for origin and endpoint */}
                             <div className="pointer-events-none absolute -top-9 left-1/2 flex h-8 w-8 -translate-x-1/2 items-end justify-center">
-                                {isCurrent ? (
-                                    <div
-                                        className={`flex h-7 w-7 items-center justify-center rounded-xl shadow-lg ring-2 ring-white ${iconBg}`}
-                                    >
-                                        <FileText
-                                            className="h-3.5 w-3.5 text-white"
-                                            strokeWidth={2.4}
-                                        />
-                                    </div>
-                                ) : isOrigin ? (
+                                {isOrigin && !hideStaticIcon && (
                                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow-md ring-2 ring-white">
                                         <Building2
                                             className="h-3 w-3"
                                             strokeWidth={2.4}
                                         />
                                     </div>
-                                ) : isEndpoint ? (
+                                )}
+                                {isEndpoint && !hideStaticIcon && (
                                     <div
                                         className={`flex h-6 w-6 items-center justify-center rounded-full text-white shadow-md ring-2 ring-white ${
                                             isFinished
@@ -800,23 +830,10 @@ function ProgressTrack({
                                             strokeWidth={2.4}
                                         />
                                     </div>
-                                ) : isMyOffice ? (
-                                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-md ring-2 ring-white">
-                                        <Building2
-                                            className="h-3 w-3"
-                                            strokeWidth={2.4}
-                                        />
-                                    </div>
-                                ) : null}
+                                )}
                             </div>
 
-                            {isCurrent && (
-                                <div
-                                    className={`absolute -top-2 left-1/2 h-2 w-0.5 -translate-x-1/2 ${tailBg}`}
-                                />
-                            )}
-
-                            {/* Marker */}
+                            {/* Marker dot */}
                             <div
                                 className={`h-3 w-3 flex-shrink-0 rounded-full ring-2 ring-white transition-all duration-300 ${markerClass}`}
                                 title={`${step.sequence}. ${
@@ -833,7 +850,7 @@ function ProgressTrack({
                                         ? 'font-bold text-blue-700'
                                         : isOrigin
                                           ? 'font-semibold text-slate-900'
-                                          : isCurrent
+                                          : isHighlighted
                                             ? 'font-medium text-slate-800'
                                             : isPassed || isFinished
                                               ? 'text-slate-500'
@@ -856,7 +873,7 @@ function ProgressTrack({
                                         Your office
                                     </span>
                                 )}
-                                {isEndpoint && !isCurrent && (
+                                {isEndpoint && (
                                     <span
                                         className={`hidden rounded px-1 py-px text-[8px] font-bold uppercase tracking-wider sm:inline-block ${
                                             isFinished
@@ -871,10 +888,45 @@ function ProgressTrack({
                         </div>
                     );
                 })}
+
+                {/* -------- moving document icon -------- */}
+                {showMovingIcon && (
+                    <>
+                        <div
+                            className="pointer-events-none absolute -top-9 flex h-8 w-8 -translate-x-1/2 items-end justify-center"
+                            style={{ left: `${iconLeftPct}%` }}
+                        >
+                            <div
+                                className={`flex h-7 w-7 items-center justify-center rounded-xl shadow-lg ring-2 ring-white ${iconBg}`}
+                            >
+                                <FileText
+                                    className="h-3.5 w-3.5 text-white"
+                                    strokeWidth={2.4}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Tail — only when the icon sits exactly on a step */}
+                        {isIconOnStep && highlightIdx >= 0 && (
+                            <div
+                                className={`pointer-events-none absolute -translate-x-1/2 ${tailBg}`}
+                                style={{
+                                    left: `${iconLeftPct}%`,
+                                    top: '-8px',
+                                    height: '14px',
+                                    width: '2px',
+                                }}
+                            />
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );
 }
+
+
+
 
 /* ================================================================== */
 /*  Small components                                                   */

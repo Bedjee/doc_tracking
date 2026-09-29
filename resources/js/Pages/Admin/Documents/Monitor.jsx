@@ -612,17 +612,19 @@ function DocumentProgressCard({ doc, scope }) {
                     <span className="truncate font-medium text-slate-700">
                         {doc.current_office?.name ?? '—'}
                     </span>
-                    {!isFinished && doc.current_destination?.name && (
-                        <>
-                            <span className="text-slate-300" aria-hidden>
-                                →
-                            </span>
-                            <span className="text-slate-500">Next</span>
-                            <span className="truncate font-medium text-slate-700">
-                                {doc.current_destination.name}
-                            </span>
-                        </>
-                    )}
+                  {!isFinished &&
+    doc.current_destination?.name &&
+    doc.current_destination_office_id !== doc.current_office_id && (
+        <>
+            <span className="text-slate-300" aria-hidden>
+                →
+            </span>
+            <span className="text-slate-500">Next</span>
+            <span className="truncate font-medium text-slate-700">
+                {doc.current_destination.name}
+            </span>
+        </>
+    )}
                 </div>
 
                 <div className="flex flex-shrink-0 items-center gap-2">

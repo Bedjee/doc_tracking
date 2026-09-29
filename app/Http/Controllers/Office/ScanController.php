@@ -81,10 +81,15 @@ class ScanController extends Controller
                 'This document is currently held by %s and is ready to be forwarded to the next office.',
                 $document->currentOffice?->name ?? 'your office'
             ),
-            default => sprintf(
-                'This document is currently routed to %s. Your office is not authorized to receive it.',
-                $document->currentDestination?->name ?? 'an unknown office'
-            ),
+           default => $document->currentDestination
+    ? sprintf(
+        'This document is currently routed to %s. Your office is not authorized to receive it.',
+        $document->currentDestination->name
+    )
+    : sprintf(
+        'This document is currently held by %s. Your office is not authorized to receive it.',
+        $document->currentOffice?->name ?? 'another office'
+    ),
         };
     }
 
